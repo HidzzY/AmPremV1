@@ -1,18 +1,3 @@
-const ALLOWED_EMAIL_DOMAINS = [
-  '@gmail.com',
-  '@yahoo.com',
-  '@yahoo.co.id',
-  '@outlook.com',
-  '@hotmail.com',
-  '@icloud.com'
-];
-
-function isAllowedDomain(email: string): boolean {
-  if (!email || typeof email !== 'string') return false;
-  const lower = email.trim().toLowerCase();
-  return ALLOWED_EMAIL_DOMAINS.some(domain => lower.endsWith(domain));
-}
-
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -35,13 +20,6 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({
         success: false,
         message: 'Email dan Magic Link dari Alight Motion wajib diisi.'
-      });
-    }
-
-    if (!isAllowedDomain(email)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Domain email tidak didukung.'
       });
     }
 

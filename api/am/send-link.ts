@@ -1,20 +1,4 @@
-const ALLOWED_EMAIL_DOMAINS = [
-  '@gmail.com',
-  '@yahoo.com',
-  '@yahoo.co.id',
-  '@outlook.com',
-  '@hotmail.com',
-  '@icloud.com'
-];
-
-function isAllowedDomain(email: string): boolean {
-  if (!email || typeof email !== 'string') return false;
-  const lower = email.trim().toLowerCase();
-  return ALLOWED_EMAIL_DOMAINS.some(domain => lower.endsWith(domain));
-}
-
 export default async function handler(req: any, res: any) {
-  // Enable CORS if needed
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
@@ -32,15 +16,8 @@ export default async function handler(req: any, res: any) {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     const { email, dailyLimit, usedToday } = body || {};
 
-    if (!email) {
-      return res.status(400).json({ success: false, message: 'Alamat email wajib diisi.' });
-    }
-
-    if (!isAllowedDomain(email)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Domain email tidak didukung. Harap gunakan @gmail.com, @yahoo.com, @yahoo.co.id, @outlook.com, @hotmail.com, atau @icloud.com.'
-      });
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ success: false, message: 'Alamat email target tidak valid.' });
     }
 
     if (typeof dailyLimit === 'number' && typeof usedToday === 'number') {

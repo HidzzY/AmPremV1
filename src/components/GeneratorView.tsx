@@ -75,13 +75,8 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({ openAuthModal }) =
     }
 
     const cleanEmail = targetEmail.trim().toLowerCase();
-    if (!cleanEmail) {
-      setErrorMsg('Silakan masukkan email tujuan.');
-      return;
-    }
-
-    if (!isValidEmailDomain(cleanEmail)) {
-      setErrorMsg('Domain email tidak didukung. Harap gunakan @gmail.com, @yahoo.com, @outlook.com, @hotmail.com, atau @icloud.com.');
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      setErrorMsg('Silakan masukkan email tujuan yang valid.');
       return;
     }
 
@@ -243,13 +238,13 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({ openAuthModal }) =
           <div>
             <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold mb-2">
               <Zap className="w-4 h-4 fill-emerald-400" />
-              <span>PRIVATE SERVER PROXY ACTIVE</span>
+              <span>ALIGHT PREMIUM GENERATOR</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
               Alight Motion Premium Generator
             </h1>
             <p className="mt-2 text-sm text-slate-300 max-w-xl leading-relaxed">
-              Buat akun Alight Motion Premium resmi tanpa watermark dengan 60 FPS support. Semua request di-proxy melalui server aman Next.js.
+              Buat akun Alight Motion Premium resmi tanpa watermark dengan 60 FPS support cepat dan memuaskan.
             </p>
           </div>
 
@@ -381,7 +376,7 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({ openAuthModal }) =
                 </div>
                 <div className="mt-2 text-[11px] text-slate-400 flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span>Domain yang diizinkan: @gmail.com, @yahoo, @outlook, @hotmail, @icloud.</span>
+                  <span>Masukkan email akun Alight Motion Anda untuk menerima tautan aktivasi.</span>
                 </div>
               </div>
 

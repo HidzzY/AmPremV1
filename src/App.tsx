@@ -52,21 +52,14 @@ const MainApp: React.FC = () => {
         <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-[#0b0f19]/90 backdrop-blur-md">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-emerald-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-                <Zap className="w-5 h-5 text-slate-950 fill-slate-950" />
-              </div>
+              <img
+                src="/icon.jpg"
+                alt="Alight Premium Logo"
+                className="w-9 h-9 rounded-full object-cover border border-emerald-500/40 shadow-lg shadow-emerald-500/20"
+              />
               <span className="text-lg font-bold tracking-tight text-white flex items-center gap-1.5">
-                Alight<span className="text-emerald-400">Pro</span>
+                Alight <span className="text-emerald-400">Premium</span>
               </span>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setIsSupabaseModalOpen(true)}
-                className="text-xs text-slate-400 hover:text-emerald-400 transition-colors"
-              >
-                Supabase SQL Setup
-              </button>
             </div>
           </div>
         </header>

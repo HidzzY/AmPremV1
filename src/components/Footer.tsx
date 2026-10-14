@@ -1,5 +1,5 @@
 import React from 'react';
-import { ExternalLink, ShieldCheck, Heart } from 'lucide-react';
+import { ExternalLink, Heart } from 'lucide-react';
 
 export const Footer: React.FC = () => {
   return (
@@ -9,8 +9,12 @@ export const Footer: React.FC = () => {
           {/* Creator Branding */}
           <div className="flex flex-col sm:flex-row items-center gap-3 text-center sm:text-left">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-              <span className="font-semibold text-slate-200 text-sm">Alight Pro Platform</span>
+              <img
+                src="/icon.jpg"
+                alt="Alight Premium Logo"
+                className="w-5 h-5 rounded-full object-cover border border-emerald-500/40"
+              />
+              <span className="font-semibold text-slate-200 text-sm">Alight Premium</span>
             </div>
             <span className="hidden sm:inline text-slate-600">·</span>
             <div className="flex items-center gap-1.5">
@@ -43,19 +47,7 @@ export const Footer: React.FC = () => {
               <span>Upgrade VIP Official</span>
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
-
-            <span className="text-slate-700">·</span>
-
-            <div className="flex items-center gap-1 text-slate-400">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Private Server Proxy Protected</span>
-            </div>
           </div>
-        </div>
-
-        <div className="mt-6 pt-6 border-t border-slate-900 flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-500 gap-3 text-center">
-          <p>© 2026 Alight Pro Hub by Alca W44. All rights reserved. Platform AM Prem Generator & Kreator Komunitas.</p>
-          <p className="font-mono text-slate-600">v2.4-secure-proxy · Next.js / Express Architecture</p>
         </div>
       </div>
     </footer>

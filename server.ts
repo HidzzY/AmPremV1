@@ -36,15 +36,8 @@ app.post('/api/am/send-link', async (req, res) => {
   try {
     const { email, userId, dailyLimit, usedToday } = req.body;
 
-    if (!email) {
-      return res.status(400).json({ success: false, message: 'Alamat email wajib diisi.' });
-    }
-
-    if (!isAllowedDomain(email)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Domain email tidak didukung. Harap gunakan @gmail.com, @yahoo.com, @yahoo.co.id, @outlook.com, @hotmail.com, atau @icloud.com.'
-      });
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ success: false, message: 'Alamat email target tidak valid.' });
     }
 
     // Limit check if provided
@@ -104,13 +97,6 @@ app.post('/api/am/verify-link', async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Email dan Magic Link dari Alight Motion wajib diisi.'
-      });
-    }
-
-    if (!isAllowedDomain(email)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Domain email tidak didukung.'
       });
     }
 

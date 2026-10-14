@@ -192,44 +192,34 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, isModal = false }
             {/* Top Badge */}
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold mb-6">
               <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Platform Alight Motion Teraman 2026</span>
+              <span>Create Akun Alight Prem</span>
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-tight text-balance">
-              Generator Alight Motion Pro & Hub Kreator Indonesia
+              Generator Alight Motion Prem
             </h1>
 
             <p className="mt-3 text-sm text-slate-300 leading-relaxed">
-              Dapatkan akses fitur premium Alight Motion resmi secara instan dengan proteksi proxy ganda, cloud limit tracker, dan ratusan preset video estetik siap pakai.
+              Dapatkan akses fitur premium Alight Motion resmi secara instan dengan cloud limit tracker, dan ratusan preset video estetik siap pakai.
             </p>
 
-            {/* Generated Banner Image */}
+            {/* Banner Image */}
             <div className="mt-6 rounded-xl overflow-hidden border border-slate-800 relative group">
               <img
-                src="/src/assets/images/alight_motion_banner_1791995934521.jpg"
-                alt="Alight Motion Timeline Interface"
+                src="/banner.jpg"
+                alt="Alight Motion Premium Pro Unlocked"
                 referrerPolicy="no-referrer"
-                className="w-full h-44 object-cover object-center group-hover:scale-105 transition-transform duration-500"
+                className="w-full h-48 object-cover object-center group-hover:scale-105 transition-transform duration-500"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-transparent flex items-end p-3">
                 <span className="text-[11px] font-medium text-emerald-300">
-                  Resmi · Tanpa Watermark · 60 FPS Export
+                  Cepat - Dan Memuaskan
                 </span>
               </div>
             </div>
 
             {/* Feature Points */}
             <div className="mt-6 space-y-3">
-              <div className="flex items-start gap-3">
-                <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
-                  <Check className="w-3.5 h-3.5" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-semibold text-white">Private Server Proxy Protected</h4>
-                  <p className="text-[11px] text-slate-400">Endpoint Alight Motion disembunyikan sepenuhnya dari browser devtools dan scraping pihak ketiga.</p>
-                </div>
-              </div>
-
               <div className="flex items-start gap-3">
                 <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
                   <Check className="w-3.5 h-3.5" />
@@ -310,7 +300,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, isModal = false }
             {/* Title & subtitle */}
             <div className="mb-5">
               <h2 className="text-xl font-bold text-white">
-                {isLoginTab ? 'Selamat Datang Kembali' : 'Buat Akun Alight Pro'}
+                {isLoginTab ? 'Selamat Datang Kembali' : 'Buat Akun'}
               </h2>
               <p className="text-xs text-slate-400 mt-1">
                 {isLoginTab
@@ -406,7 +396,7 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, isModal = false }
                       type="text"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      placeholder="contoh: alca_editor"
+                      placeholder="isi username akun"
                       required
                       className="w-full pl-9 pr-3 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all"
                     />
@@ -469,13 +459,13 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, isModal = false }
                 <div>
                   <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center gap-1.5">
                     <Gift className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Kode Undangan / Referral (Opsional)</span>
+                    <span>Kode Undangan (Opsional)</span>
                   </label>
                   <input
                     type="text"
                     value={referralCode}
                     onChange={(e) => setReferralCode(e.target.value)}
-                    placeholder="Masukkan username pengundang (contoh: alcaw44)"
+                    placeholder="masukin code redeeem"
                     className="w-full px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all font-mono"
                   />
                   <p className="mt-1 text-[10px] text-emerald-400/80">
@@ -576,19 +566,6 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, isModal = false }
                   <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
                 </svg>
                 <span>GitHub</span>
-              </button>
-            </div>
-
-            {/* Quick Fill Admin Button */}
-            <div className="mt-5 pt-4 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
-              <span>Akses SuperAdmin:</span>
-              <button
-                type="button"
-                onClick={handleQuickAdmin}
-                className="text-emerald-400 hover:text-emerald-300 font-medium flex items-center gap-1 hover:underline"
-              >
-                <KeyRound className="w-3.5 h-3.5" />
-                <span>Isi Cepat (wahidrahmannn1324@gmail.com)</span>
               </button>
             </div>
 
