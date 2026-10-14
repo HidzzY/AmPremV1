@@ -1,0 +1,6 @@
+{
+  "name": "Alight Pro - Generator & Community Hub",
+  "description": "Platform modern Alight Motion Premium Generator dengan Proxy Aman, Sistem Limit VIP, Preset Sharing, dan Komunitas Kreator by Alca W44.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
