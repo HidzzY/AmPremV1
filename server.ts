@@ -280,46 +280,98 @@ app.post('/api/am/verify-link', async (req, res) => {
 });
 
 // ==========================================
-// REAL-TIME SYNC APIS (Chat, Preset, Gallery, Logs, Users & Terpakai)
+// REAL-TIME SYNC & SSE STREAM (Instant Multi-User Chat, Preset, Gallery, Logs, Users & Limit)
 // ==========================================
 
-// GET /api/realtime/sync -> Full realtime state
+// Connected SSE clients for instantaneous real-time push (<50ms latency)
+const sseClients = new Set<express.Response>();
+
+function broadcastSSE(type: string, data: any) {
+  const payload = `data: ${JSON.stringify({ type, data, timestamp: new Date().toISOString() })}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(payload);
+    } catch (e) {
+      sseClients.delete(client);
+    }
+  }
+}
+
+// GET /api/realtime/stream -> Real-time Server-Sent Events stream for all connected browsers
+app.get('/api/realtime/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  // Send initial snapshot immediately upon connection
+  res.write(`data: ${JSON.stringify({ type: 'CONNECTED', data: realtimeState, timestamp: new Date().toISOString() })}\n\n`);
+
+  sseClients.add(res);
+  console.log(`[SSE] Client connected. Total active clients: ${sseClients.size}`);
+
+  // Heartbeat keep-alive every 15 seconds to prevent proxy timeout
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(': keep-alive\n\n');
+    } catch {
+      clearInterval(heartbeat);
+      sseClients.delete(res);
+    }
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    sseClients.delete(res);
+    console.log(`[SSE] Client disconnected. Total active clients: ${sseClients.size}`);
+  });
+});
+
+// GET /api/realtime/sync -> Full realtime state snapshot
 app.get('/api/realtime/sync', (req, res) => {
   res.json({
     success: true,
     data: realtimeState,
+    activeConnections: sseClients.size,
     timestamp: new Date().toISOString()
   });
 });
 
-// POST /api/realtime/chat -> Add new chat message
+// POST /api/realtime/chat -> Add new chat message & broadcast INSTANTLY to all users
 app.post('/api/realtime/chat', (req, res) => {
   const { user_id, username, avatar_url, role, message } = req.body;
-  if (!message || !message.trim()) {
+  if (!message || !String(message).trim()) {
     return res.status(400).json({ success: false, message: 'Pesan tidak boleh kosong' });
   }
 
+  const cleanMessage = String(message).trim();
   const newChat = {
-    id: 'chat-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+    id: 'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
     user_id: user_id || 'anonymous',
     username: username || 'User',
     avatar_url: avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${username || 'anon'}`,
-    role: role || 'free',
-    message: String(message).trim(),
+    role: (role === 'admin' ? 'admin' : role === 'vip' ? 'vip' : 'free') as 'free' | 'vip' | 'admin',
+    message: cleanMessage,
     created_at: new Date().toISOString()
   };
 
   realtimeState.chats.push(newChat);
-  // Keep last 150 chats
-  if (realtimeState.chats.length > 150) {
-    realtimeState.chats = realtimeState.chats.slice(-150);
+  // Keep last 200 chats
+  if (realtimeState.chats.length > 200) {
+    realtimeState.chats = realtimeState.chats.slice(-200);
   }
   persistState();
+
+  // Instant broadcast to all connected clients!
+  broadcastSSE('NEW_CHAT', { chat: newChat, chats: realtimeState.chats });
+
+  console.log(`[Chat] Real-time message from ${newChat.username}: "${cleanMessage.substring(0, 30)}..." pushed to ${sseClients.size} clients`);
 
   res.json({ success: true, chat: newChat, chats: realtimeState.chats });
 });
 
-// POST /api/realtime/preset -> Upload preset
+// POST /api/realtime/preset -> Upload preset & broadcast
 app.post('/api/realtime/preset', (req, res) => {
   const { title, link, preview_url, category, user_id, username, avatar_url } = req.body;
   if (!title || !link) {
@@ -327,7 +379,7 @@ app.post('/api/realtime/preset', (req, res) => {
   }
 
   const newPreset = {
-    id: 'preset-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+    id: 'preset-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
     title: String(title).trim(),
     link: String(link).trim(),
     preview_url: preview_url || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500&auto=format&fit=crop&q=80',
@@ -342,29 +394,33 @@ app.post('/api/realtime/preset', (req, res) => {
   realtimeState.presets.unshift(newPreset);
   persistState();
 
+  broadcastSSE('PRESETS_UPDATED', { presets: realtimeState.presets, newPreset });
+
   res.json({ success: true, preset: newPreset, presets: realtimeState.presets });
 });
 
-// DELETE /api/realtime/preset/:id -> Delete preset
+// DELETE /api/realtime/preset/:id -> Delete preset & broadcast
 app.delete('/api/realtime/preset/:id', (req, res) => {
   const { id } = req.params;
   realtimeState.presets = realtimeState.presets.filter(p => p.id !== id);
   persistState();
+  broadcastSSE('PRESETS_UPDATED', { presets: realtimeState.presets });
   res.json({ success: true, presets: realtimeState.presets });
 });
 
-// POST /api/realtime/preset/:id/download -> Increment download count
+// POST /api/realtime/preset/:id/download -> Increment download count & broadcast
 app.post('/api/realtime/preset/:id/download', (req, res) => {
   const { id } = req.params;
   const p = realtimeState.presets.find(item => item.id === id);
   if (p) {
     p.downloads = (p.downloads || 0) + 1;
     persistState();
+    broadcastSSE('PRESETS_UPDATED', { presets: realtimeState.presets });
   }
   res.json({ success: true, presets: realtimeState.presets });
 });
 
-// POST /api/realtime/gallery -> Upload gallery item
+// POST /api/realtime/gallery -> Upload gallery item & broadcast
 app.post('/api/realtime/gallery', (req, res) => {
   const { image_url, caption, user_id, username, avatar_url } = req.body;
   if (!image_url) {
@@ -372,7 +428,7 @@ app.post('/api/realtime/gallery', (req, res) => {
   }
 
   const newItem = {
-    id: 'gallery-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+    id: 'gallery-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
     image_url,
     caption: caption || '',
     likes: 0,
@@ -384,16 +440,18 @@ app.post('/api/realtime/gallery', (req, res) => {
 
   realtimeState.gallery.unshift(newItem);
   persistState();
+  broadcastSSE('GALLERY_UPDATED', { gallery: realtimeState.gallery, newItem });
   res.json({ success: true, item: newItem, gallery: realtimeState.gallery });
 });
 
-// POST /api/realtime/gallery/:id/like -> Toggle like
+// POST /api/realtime/gallery/:id/like -> Toggle like & broadcast
 app.post('/api/realtime/gallery/:id/like', (req, res) => {
   const { id } = req.params;
   const g = realtimeState.gallery.find(item => item.id === id);
   if (g) {
     g.likes = (g.likes || 0) + 1;
     persistState();
+    broadcastSSE('GALLERY_UPDATED', { gallery: realtimeState.gallery });
   }
   res.json({ success: true, gallery: realtimeState.gallery });
 });
@@ -406,7 +464,7 @@ app.post('/api/realtime/am-log', (req, res) => {
   }
 
   const newLog = {
-    id: 'log-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+    id: 'log-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
     target_email: String(targetEmail).trim(),
     created_at: new Date().toISOString(),
     user_id: userId || 'guest',
@@ -425,10 +483,11 @@ app.post('/api/realtime/am-log', (req, res) => {
   }
 
   persistState();
+  broadcastSSE('AM_LOGS_UPDATED', { log: newLog, amLogs: realtimeState.amLogs, users: realtimeState.users });
   res.json({ success: true, log: newLog, amLogs: realtimeState.amLogs, users: realtimeState.users });
 });
 
-// POST /api/realtime/users/sync -> Sync user profile into server user list
+// POST /api/realtime/users/sync -> Sync user profile into server user list & broadcast
 app.post('/api/realtime/users/sync', (req, res) => {
   const { user } = req.body;
   if (!user || !user.id) {
@@ -455,6 +514,7 @@ app.post('/api/realtime/users/sync', (req, res) => {
   }
 
   persistState();
+  broadcastSSE('USERS_UPDATED', { users: realtimeState.users });
   res.json({ success: true, users: realtimeState.users });
 });
 
@@ -484,6 +544,7 @@ app.post('/api/realtime/users/admin-action', (req, res) => {
   }
 
   persistState();
+  broadcastSSE('USERS_UPDATED', { users: realtimeState.users });
   res.json({ success: true, users: realtimeState.users });
 });
 
@@ -508,15 +569,17 @@ app.post('/api/realtime/redeem-code', (req, res) => {
 
   realtimeState.redeemCodes.unshift(newCode);
   persistState();
+  broadcastSSE('REDEEM_CODES_UPDATED', { redeemCodes: realtimeState.redeemCodes });
   res.json({ success: true, redeemCode: newCode, redeemCodes: realtimeState.redeemCodes });
 });
 
-// DELETE /api/realtime/redeem-code/:code -> Delete redeem code
+// DELETE /api/realtime/redeem-code/:code -> Delete redeem code & broadcast
 app.delete('/api/realtime/redeem-code/:code', (req, res) => {
   const { code } = req.params;
   const cleanCode = decodeURIComponent(code).trim().toUpperCase();
   realtimeState.redeemCodes = realtimeState.redeemCodes.filter(r => r.code.toUpperCase() !== cleanCode);
   persistState();
+  broadcastSSE('REDEEM_CODES_UPDATED', { redeemCodes: realtimeState.redeemCodes });
   res.json({ success: true, redeemCodes: realtimeState.redeemCodes });
 });
 

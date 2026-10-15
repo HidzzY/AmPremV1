@@ -7,7 +7,9 @@ import {
   ShieldCheck, 
   Smile, 
   User as UserIcon,
-  Crown
+  Crown,
+  RefreshCw,
+  Radio
 } from 'lucide-react';
 
 interface LiveChatViewProps {
@@ -15,16 +17,28 @@ interface LiveChatViewProps {
 }
 
 export const LiveChatView: React.FC<LiveChatViewProps> = ({ openAuthModal }) => {
-  const { currentUser, chats, sendChatMessage } = useAuth();
+  const { currentUser, chats, sendChatMessage, refreshChats } = useAuth();
   const [inputText, setInputText] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  // Sync on mount
+  useEffect(() => {
+    refreshChats().catch(() => {});
+  }, []);
 
   // Auto scroll to bottom when new messages arrive
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chats.length]);
 
-  const handleSend = (e: React.FormEvent) => {
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    await refreshChats();
+    setTimeout(() => setIsRefreshing(false), 500);
+  };
+
+  const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) {
       openAuthModal();
@@ -32,8 +46,9 @@ export const LiveChatView: React.FC<LiveChatViewProps> = ({ openAuthModal }) => 
     }
     if (!inputText.trim()) return;
 
-    sendChatMessage(inputText);
+    const text = inputText;
     setInputText('');
+    await sendChatMessage(text);
   };
 
   return (
@@ -48,16 +63,28 @@ export const LiveChatView: React.FC<LiveChatViewProps> = ({ openAuthModal }) => 
           <div>
             <h1 className="text-lg font-bold text-white flex items-center gap-2">
               <span>Live Community Chat</span>
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[11px] font-semibold text-emerald-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                <span>Real-Time Online</span>
+              </span>
             </h1>
             <p className="text-xs text-slate-400">
-              Forum obrolan langsung sesama kreator Alight Motion & editor video Indonesia.
+              Obrolan langsung real-time sesama kreator Alight Motion & editor video Indonesia.
             </p>
           </div>
         </div>
 
-        <div className="text-xs text-slate-400 font-mono hidden sm:block">
-          {chats.length} Pesan
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleManualRefresh}
+            title="Segarkan pesan obrolan"
+            className="p-2 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white transition-colors"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-emerald-400' : ''}`} />
+          </button>
+          <div className="text-xs text-slate-400 font-mono hidden sm:block bg-slate-900/60 px-3 py-1.5 rounded-lg border border-slate-800">
+            {chats.length} Pesan
+          </div>
         </div>
       </div>
 

@@ -30,7 +30,8 @@ interface AuthContextType {
   addPreset: (title: string, link: string, previewUrl: string, category: string) => void;
   deletePreset: (presetId: string) => void;
   incrementPresetDownload: (presetId: string) => void;
-  sendChatMessage: (message: string) => void;
+  sendChatMessage: (message: string) => Promise<void>;
+  refreshChats: () => Promise<void>;
   addGalleryItem: (imageUrl: string, caption: string) => void;
   toggleLikeGallery: (galleryId: string) => void;
   refreshLimitCheck: () => void;
@@ -136,19 +137,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const saved = localStorage.getItem('alight_presets');
       if (saved) {
         const parsed: Preset[] = JSON.parse(saved);
-        return parsed.filter(p => !p.id.startsWith('preset-demo-') && !p.id.startsWith('preset-1') && !p.id.startsWith('preset-2') && !p.id.startsWith('preset-3'));
+        return parsed.filter(p => p && p.id && !['preset-demo-1', 'preset-demo-2', 'preset-1', 'preset-2', 'preset-3'].includes(p.id));
       }
     } catch (e) {}
     return INITIAL_PRESETS;
   });
 
-  // Live Chats: mulai dari 0
+  // Live Chats: mulai dari 0 (hanya chat nyata antar-user)
   const [chats, setChats] = useState<ChatMessage[]>(() => {
     try {
       const saved = localStorage.getItem('alight_chats');
       if (saved) {
         const parsed: ChatMessage[] = JSON.parse(saved);
-        return parsed.filter(c => !c.id.startsWith('chat-1') && !c.id.startsWith('chat-2') && !c.id.startsWith('chat-3'));
+        return parsed.filter(c => c && c.id && c.message && !['chat-1', 'chat-2', 'chat-3'].includes(c.id));
       }
     } catch (e) {}
     return INITIAL_CHATS;
@@ -160,7 +161,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const saved = localStorage.getItem('alight_gallery');
       if (saved) {
         const parsed: GalleryItem[] = JSON.parse(saved);
-        return parsed.filter(g => !g.id.startsWith('gallery-1') && !g.id.startsWith('gallery-2') && !g.id.startsWith('gallery-3'));
+        return parsed.filter(g => g && g.id && !['gallery-1', 'gallery-2', 'gallery-3'].includes(g.id));
       }
     } catch (e) {}
     return INITIAL_GALLERY;
@@ -172,7 +173,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const saved = localStorage.getItem('alight_redeem_codes');
       if (saved) {
         const parsed: RedeemCode[] = JSON.parse(saved);
-        return parsed.filter(r => r.code !== 'ALCAPREM2026' && r.code !== 'RAMADHANVIP' && r.code !== 'ALCAW44SPECIAL');
+        return parsed.filter(r => r && r.code && r.code !== 'ALCAPREM2026' && r.code !== 'RAMADHANVIP' && r.code !== 'ALCAW44SPECIAL');
       }
     } catch (e) {}
     return INITIAL_REDEEM_CODES;
@@ -185,7 +186,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [pendingReferral, setPendingReferral] = useState<string | null>(null);
 
-  // BroadcastChannel reference
+  // BroadcastChannel reference for instant same-browser cross-tab sync
   const channelRef = useRef<BroadcastChannel | null>(null);
 
   useEffect(() => {
@@ -216,10 +217,111 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // REAL-TIME SYNC POLLING: Fetch from server every 2500ms
+  // MANUAL / ON-DEMAND CHAT REFRESH
+  const refreshChats = async () => {
+    try {
+      const res = await fetch('/api/realtime/sync');
+      if (!res.ok) return;
+      const result = await res.json();
+      if (result.success && result.data) {
+        if (Array.isArray(result.data.chats)) setChats(result.data.chats);
+        if (Array.isArray(result.data.presets)) setPresets(result.data.presets);
+        if (Array.isArray(result.data.gallery)) setGallery(result.data.gallery);
+        if (Array.isArray(result.data.amLogs)) setAmLogs(result.data.amLogs);
+        if (Array.isArray(result.data.redeemCodes)) setRedeemCodes(result.data.redeemCodes);
+        if (Array.isArray(result.data.users) && result.data.users.length > 0) {
+          setAllUsers(result.data.users);
+        }
+      }
+    } catch (e) {}
+  };
+
+  // TRUE REAL-TIME MULTI-USER SYNC VIA SSE (Server-Sent Events) + FALLBACK POLLING
   useEffect(() => {
     let isMounted = true;
+    let eventSource: EventSource | null = null;
 
+    // 1. Establish real-time SSE stream for instant push from server
+    const initSSE = () => {
+      if (typeof window === 'undefined' || !window.EventSource || !isMounted) return;
+
+      try {
+        eventSource = new EventSource('/api/realtime/stream');
+
+        eventSource.onopen = () => {
+          // Connected to realtime server
+        };
+
+        eventSource.onmessage = (event) => {
+          if (!isMounted) return;
+          try {
+            const parsed = JSON.parse(event.data);
+            if (!parsed) return;
+
+            if (parsed.type === 'CONNECTED') {
+              const state = parsed.data;
+              if (state) {
+                if (Array.isArray(state.chats)) setChats(state.chats);
+                if (Array.isArray(state.presets)) setPresets(state.presets);
+                if (Array.isArray(state.gallery)) setGallery(state.gallery);
+                if (Array.isArray(state.amLogs)) setAmLogs(state.amLogs);
+                if (Array.isArray(state.redeemCodes)) setRedeemCodes(state.redeemCodes);
+                if (Array.isArray(state.users) && state.users.length > 0) {
+                  setAllUsers(state.users);
+                  setCurrentUser(curr => {
+                    if (!curr) return null;
+                    const fresh = state.users.find((u: UserProfile) => u.id === curr.id || u.email === curr.email);
+                    return fresh ? { ...curr, ...fresh } : curr;
+                  });
+                }
+              }
+            } else if (parsed.type === 'NEW_CHAT') {
+              const incoming = parsed.data?.chat;
+              if (incoming && incoming.id) {
+                setChats(prev => {
+                  if (prev.some(c => c.id === incoming.id)) return prev;
+                  // Replace any optimistic message with same text & user
+                  const withoutTemp = prev.filter(c => !(c.id.startsWith('temp-') && c.user_id === incoming.user_id && c.message === incoming.message));
+                  return [...withoutTemp, incoming];
+                });
+              } else if (Array.isArray(parsed.data?.chats)) {
+                setChats(parsed.data.chats);
+              }
+            } else if (parsed.type === 'PRESETS_UPDATED') {
+              if (Array.isArray(parsed.data?.presets)) setPresets(parsed.data.presets);
+            } else if (parsed.type === 'GALLERY_UPDATED') {
+              if (Array.isArray(parsed.data?.gallery)) setGallery(parsed.data.gallery);
+            } else if (parsed.type === 'AM_LOGS_UPDATED') {
+              if (Array.isArray(parsed.data?.amLogs)) setAmLogs(parsed.data.amLogs);
+              if (Array.isArray(parsed.data?.users)) setAllUsers(parsed.data.users);
+            } else if (parsed.type === 'USERS_UPDATED') {
+              if (Array.isArray(parsed.data?.users)) {
+                setAllUsers(parsed.data.users);
+                setCurrentUser(curr => {
+                  if (!curr) return null;
+                  const fresh = parsed.data.users.find((u: UserProfile) => u.id === curr.id || u.email === curr.email);
+                  return fresh ? { ...curr, ...fresh } : curr;
+                });
+              }
+            } else if (parsed.type === 'REDEEM_CODES_UPDATED') {
+              if (Array.isArray(parsed.data?.redeemCodes)) setRedeemCodes(parsed.data.redeemCodes);
+            }
+          } catch (e) {
+            console.warn('Error parsing SSE event payload:', e);
+          }
+        };
+
+        eventSource.onerror = () => {
+          // EventSource will automatically attempt reconnection
+        };
+      } catch (err) {
+        console.warn('Failed connecting EventSource:', err);
+      }
+    };
+
+    initSSE();
+
+    // 2. High-frequency Polling fallback (every 2000ms) + initial sync
     const fetchRealtimeSync = async () => {
       try {
         const res = await fetch('/api/realtime/sync');
@@ -241,17 +343,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return fresh ? { ...curr, ...fresh } : curr;
           });
         }
-      } catch (e) {
-        // Silent catch for offline or non-blocking network lag
-      }
+      } catch (e) {}
     };
 
     fetchRealtimeSync();
-    const interval = setInterval(fetchRealtimeSync, 2500);
+    const interval = setInterval(fetchRealtimeSync, 2000);
+
+    // 3. Instant sync on tab focus or visibility change
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchRealtimeSync();
+      }
+    };
+    window.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('focus', fetchRealtimeSync);
 
     return () => {
       isMounted = false;
       clearInterval(interval);
+      window.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('focus', fetchRealtimeSync);
+      if (eventSource) {
+        eventSource.close();
+      }
     };
   }, []);
 
@@ -951,33 +1065,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }).catch(() => {});
   };
 
-  const sendChatMessage = (message: string) => {
+  const sendChatMessage = async (message: string) => {
     if (!currentUser || !message.trim()) return;
-    const newMsg: ChatMessage = {
-      id: 'chat-' + Math.random().toString(36).substring(2, 9),
+    const cleanMsg = message.trim();
+
+    const tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6);
+    const optimisticMsg: ChatMessage = {
+      id: tempId,
       user_id: currentUser.id,
       username: currentUser.username,
       avatar_url: currentUser.avatar_url,
       role: currentUser.role,
-      message: message.trim(),
+      message: cleanMsg,
       created_at: new Date().toISOString()
     };
-    setChats(prev => {
-      const next = [...prev, newMsg];
-      broadcastSync({ chats: next });
-      return next;
-    });
-    fetch('/api/realtime/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user_id: currentUser.id,
-        username: currentUser.username,
-        avatar_url: currentUser.avatar_url,
-        role: currentUser.role,
-        message: newMsg.message
-      })
-    }).catch(() => {});
+
+    // Instant local optimistic update
+    setChats(prev => [...prev, optimisticMsg]);
+    broadcastSync({ chats: [...chats, optimisticMsg] });
+
+    try {
+      const res = await fetch('/api/realtime/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: currentUser.id,
+          username: currentUser.username,
+          avatar_url: currentUser.avatar_url,
+          role: currentUser.role,
+          message: cleanMsg
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.chat) {
+        setChats(prev => {
+          const filtered = prev.filter(c => c.id !== tempId);
+          if (filtered.some(c => c.id === data.chat.id)) return filtered;
+          return [...filtered, data.chat];
+        });
+      }
+    } catch (err) {
+      console.error('Failed to send chat message:', err);
+    }
   };
 
   const addGalleryItem = (imageUrl: string, caption: string) => {
@@ -1049,6 +1178,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         deletePreset,
         incrementPresetDownload,
         sendChatMessage,
+        refreshChats,
         addGalleryItem,
         toggleLikeGallery,
         refreshLimitCheck
