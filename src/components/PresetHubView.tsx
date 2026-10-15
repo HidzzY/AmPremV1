@@ -141,10 +141,16 @@ export const PresetHubView: React.FC<PresetHubViewProps> = ({ openAuthModal }) =
 
       {/* Preset Grid */}
       {filteredPresets.length === 0 ? (
-        <div className="text-center py-16 bg-slate-900/40 border border-slate-800/80 rounded-2xl">
+        <div className="text-center py-16 bg-slate-900/40 border border-slate-800/80 rounded-2xl p-6">
           <Layers className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-          <h3 className="text-sm font-semibold text-slate-300">Preset Tidak Ditemukan</h3>
-          <p className="text-xs text-slate-500 mt-1">Coba kata kunci lain atau jadilah yang pertama membagikan preset ini!</p>
+          <h3 className="text-sm font-semibold text-slate-300">
+            {presets.length === 0 ? 'Belum Ada Preset Terdaftar (0 Preset)' : 'Preset Tidak Ditemukan'}
+          </h3>
+          <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+            {presets.length === 0 
+              ? 'Belum ada pengguna lain yang mengunggah preset. Klik tombol "Upload Preset Baru" di atas untuk membagikan karya Anda!' 
+              : 'Coba kata kunci pencarian lain atau pilih kategori yang berbeda.'}
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">

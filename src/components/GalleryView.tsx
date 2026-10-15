@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { 
   Image as ImageIcon, 
@@ -8,7 +8,8 @@ import {
   User, 
   Sparkles,
   Share2,
-  Check
+  Check,
+  Camera
 } from 'lucide-react';
 
 interface GalleryViewProps {
@@ -22,6 +23,38 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ openAuthModal }) => {
   const [imageUrl, setImageUrl] = useState('');
   const [caption, setCaption] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 900;
+        let width = img.width;
+        let height = img.height;
+        if (width > MAX_WIDTH) {
+          height = Math.round((height * MAX_WIDTH) / width);
+          width = MAX_WIDTH;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          setImageUrl(canvas.toDataURL('image/jpeg', 0.85));
+        } else {
+          setImageUrl(event.target?.result as string);
+        }
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleUpload = (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,16 +191,43 @@ export const GalleryView: React.FC<GalleryViewProps> = ({ openAuthModal }) => {
             <form onSubmit={handleUpload} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  URL Gambar / Screenshot <span className="text-emerald-400">*</span>
+                  Gambar / Tangkapan Layar Karya <span className="text-emerald-400">*</span>
                 </label>
+                
                 <input
-                  type="url"
-                  value={imageUrl}
-                  onChange={(e) => setImageUrl(e.target.value)}
-                  placeholder="https://images.unsplash.com/... atau link gambar publik"
-                  required
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileChange}
+                  className="hidden"
                 />
+
+                <div className="flex gap-2 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Pilih Foto dari Galeri / Laptop</span>
+                  </button>
+                </div>
+
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={imageUrl}
+                    onChange={(e) => setImageUrl(e.target.value)}
+                    placeholder="Atau tempel URL gambar di sini..."
+                    required
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
+                  />
+                </div>
+                {imageUrl && (
+                  <div className="mt-2 relative w-full h-24 bg-slate-950 rounded-xl overflow-hidden border border-slate-800">
+                    <img src={imageUrl} alt="Pratinjau" className="w-full h-full object-cover" />
+                  </div>
+                )}
               </div>
 
               <div>

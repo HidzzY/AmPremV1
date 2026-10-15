@@ -533,7 +533,7 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({ openAuthModal }) =
                 type="text"
                 value={redeemInput}
                 onChange={(e) => setRedeemInput(e.target.value.toUpperCase())}
-                placeholder="CONTOH: ALCAPREM2026"
+                placeholder="Contoh: xxxxxxxxx"
                 className="w-full px-3 py-2 bg-slate-950/70 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 uppercase font-mono tracking-wider"
               />
               <button
@@ -544,10 +544,6 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({ openAuthModal }) =
                 {isRedeeming ? 'Memvalidasi...' : 'Tukarkan Kode'}
               </button>
             </form>
-
-            <div className="mt-3 text-[10px] text-slate-500">
-              Kode promo aktif hari ini: <span className="font-mono text-emerald-400">ALCAPREM2026</span>
-            </div>
           </div>
 
           {/* Upgrade ke VIP Banner */}

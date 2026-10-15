@@ -63,7 +63,14 @@ export const LiveChatView: React.FC<LiveChatViewProps> = ({ openAuthModal }) => 
 
       {/* Messages Scroll Area */}
       <div className="flex-1 overflow-y-auto py-4 space-y-4 pr-1">
-        {chats.map((chat) => {
+        {chats.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-center p-8 text-slate-500">
+            <MessageSquare className="w-10 h-10 text-slate-600 mb-3" />
+            <p className="text-sm font-semibold text-slate-300">Belum Ada Pesan</p>
+            <p className="text-xs text-slate-500 mt-1">Jadilah yang pertama mengirim pesan di Live Chat!</p>
+          </div>
+        ) : (
+          chats.map((chat) => {
           const isMe = currentUser?.id === chat.user_id;
           const isAdmin = chat.role === 'admin';
           const isVip = chat.role === 'vip';
@@ -120,7 +127,7 @@ export const LiveChatView: React.FC<LiveChatViewProps> = ({ openAuthModal }) => 
               </div>
             </div>
           );
-        })}
+        }))}
         <div ref={chatBottomRef} />
       </div>
 

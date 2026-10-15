@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { 
   User, 
@@ -15,7 +15,9 @@ import {
   Gift, 
   Share2, 
   CheckCircle,
-  AlertTriangle
+  AlertTriangle,
+  Camera,
+  Upload
 } from 'lucide-react';
 
 interface ProfileViewProps {
@@ -33,6 +35,48 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ openAuthModal }) => {
 
   const [copiedRef, setCopiedRef] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_SIZE = 300;
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > MAX_SIZE) {
+            height = Math.round((height * MAX_SIZE) / width);
+            width = MAX_SIZE;
+          }
+        } else {
+          if (height > MAX_SIZE) {
+            width = Math.round((width * MAX_SIZE) / height);
+            height = MAX_SIZE;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+          setNewAvatarUrl(dataUrl);
+        } else {
+          setNewAvatarUrl(event.target?.result as string);
+        }
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
 
   if (!currentUser) {
     return (
@@ -167,25 +211,67 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ openAuthModal }) => {
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-4">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Username Baru</label>
+                <label className="block text-[11px] text-slate-400 mb-1">Username Akun</label>
                 <input
                   type="text"
                   value={newUsername}
                   onChange={(e) => setNewUsername(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">URL Avatar Foto Profil</label>
-                <input
-                  type="url"
-                  value={newAvatarUrl}
-                  onChange={(e) => setNewAvatarUrl(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
-                />
+                <label className="block text-[11px] text-slate-300 font-semibold mb-2">
+                  Foto Profil (Ambil dari Galeri atau Kamera)
+                </label>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl">
+                  <img
+                    src={newAvatarUrl || currentUser.avatar_url}
+                    alt="Pratinjau Foto"
+                    className="w-16 h-16 rounded-xl object-cover border-2 border-emerald-500/50 bg-slate-800 shrink-0 shadow-md"
+                  />
+                  <div className="space-y-2 flex-1">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                    <input
+                      ref={cameraInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="user"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center gap-2 transition-colors shadow-sm"
+                      >
+                        <Upload className="w-4 h-4 text-emerald-400" />
+                        <span>Pilih dari Galeri</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => cameraInputRef.current?.click()}
+                        className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center gap-2 transition-colors shadow-sm"
+                      >
+                        <Camera className="w-4 h-4 text-emerald-400" />
+                        <span>Buka Kamera</span>
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Pilih foto langsung dari galeri HP/laptop atau jepret langsung dengan kamera perangkat.
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
 

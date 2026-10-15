@@ -26,6 +26,7 @@ export const AdminDashboardView: React.FC = () => {
     adminResetUserLimit, 
     adminChangeRole, 
     adminAddRedeemCode,
+    adminDeleteRedeemCode,
     redeemCodes,
     amLogs
   } = useAuth();
@@ -79,6 +80,11 @@ export const AdminDashboardView: React.FC = () => {
     adminAddRedeemCode(newCodeName.trim(), Number(newCodeReward));
     setNewCodeName('');
     showNotification(`Kode redeem ${newCodeName.toUpperCase()} (+${newCodeReward} limit) aktif!`);
+  };
+
+  const handleDeleteCode = (codeName: string) => {
+    adminDeleteRedeemCode(codeName);
+    showNotification(`Kode redeem ${codeName} berhasil dihapus.`);
   };
 
   return (
@@ -304,8 +310,19 @@ export const AdminDashboardView: React.FC = () => {
                     {u.daily_limit}x/hari
                   </td>
 
-                  <td className="py-3 px-3 font-mono text-slate-300 tabular-nums">
-                    {u.used_limit_today}x
+                  <td className="py-3 px-3 font-mono tabular-nums">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                        u.used_limit_today > 0 
+                          ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' 
+                          : 'text-slate-400 bg-slate-800/60'
+                      }`}>
+                        {u.used_limit_today}x
+                      </span>
+                      {u.used_limit_today > 0 && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="Aktif terpakai" />
+                      )}
+                    </div>
                   </td>
 
                   <td className="py-3 px-3 text-right space-x-2">
@@ -339,19 +356,35 @@ export const AdminDashboardView: React.FC = () => {
           <span>Daftar Kode Redeem Terdaftar</span>
         </h3>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {redeemCodes.map((code) => (
-            <div key={code.code} className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl flex items-center justify-between">
-              <div>
-                <span className="font-mono text-xs font-bold text-amber-300 block">{code.code}</span>
-                <span className="text-[10px] text-slate-400">Reward: +{code.limit_reward} Limit</span>
+        {redeemCodes.length === 0 ? (
+          <div className="py-8 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+            Belum ada kode redeem aktif (0 kode). Buat kode baru menggunakan formulir di atas.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {redeemCodes.map((code) => (
+              <div key={code.code} className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl flex items-center justify-between">
+                <div>
+                  <span className="font-mono text-xs font-bold text-amber-300 block">{code.code}</span>
+                  <span className="text-[10px] text-slate-400">Reward: +{code.limit_reward} Limit</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="px-1.5 py-0.5 rounded text-[9px] bg-emerald-500/10 text-emerald-400 font-bold">
+                    AKTIF
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteCode(code.code)}
+                    className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                    title="Hapus kode redeem"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
-              <span className="px-1.5 py-0.5 rounded text-[9px] bg-emerald-500/10 text-emerald-400 font-bold">
-                AKTIF
-              </span>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
     </div>

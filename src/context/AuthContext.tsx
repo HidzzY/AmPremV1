@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { UserProfile, AMLog, RedeemCode, Referral, Preset, ChatMessage, GalleryItem, UserRole, isValidEmailDomain } from '../types';
 import { INITIAL_PRESETS, INITIAL_CHATS, INITIAL_GALLERY, INITIAL_REDEEM_CODES, ADMIN_CREDENTIALS } from '../lib/mockData';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 
 interface AuthContextType {
   currentUser: UserProfile | null;
@@ -26,6 +26,7 @@ interface AuthContextType {
   adminResetUserLimit: (userId: string) => void;
   adminChangeRole: (userId: string, role: UserRole) => void;
   adminAddRedeemCode: (code: string, reward: number) => void;
+  adminDeleteRedeemCode: (code: string) => void;
   addPreset: (title: string, link: string, previewUrl: string, category: string) => void;
   deletePreset: (presetId: string) => void;
   incrementPresetDownload: (presetId: string) => void;
@@ -37,29 +38,17 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Primary Admin Profile locked to wahidrahmannn1324@gmail.com
+// Primary Admin Profile locked to wahidrahmannn1324@gmail.com and username AlcaW44
 const DEFAULT_ADMIN_PROFILE: UserProfile = {
   id: 'user-admin-wahid',
   email: 'wahidrahmannn1324@gmail.com',
-  username: 'SuperAdmin_Alca',
+  username: 'AlcaW44',
   avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
   role: 'admin',
   daily_limit: 9999,
   used_limit_today: 0,
   last_limit_reset: new Date().toISOString(),
-  created_at: new Date(Date.now() - 3600000 * 24 * 30).toISOString()
-};
-
-const DEFAULT_VIP_PROFILE: UserProfile = {
-  id: 'user-rizky-vip',
-  email: 'rizky.amv@gmail.com',
-  username: 'rizky_am',
-  avatar_url: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150&auto=format&fit=crop&q=80',
-  role: 'vip',
-  daily_limit: 100,
-  used_limit_today: 4,
-  last_limit_reset: new Date().toISOString(),
-  created_at: new Date(Date.now() - 3600000 * 24 * 14).toISOString()
+  created_at: new Date().toISOString()
 };
 
 // Helper to set cookie for middleware synchronization
@@ -74,53 +63,119 @@ function setAuthCookies(user: UserProfile | null) {
   }
 }
 
+// BroadcastChannel for instant cross-tab real-time sync
+const getRealtimeChannel = () => {
+  if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+    return new BroadcastChannel('alight_realtime_sync');
+  }
+  return null;
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
-    const saved = localStorage.getItem('alight_current_user');
-    return saved ? JSON.parse(saved) : null;
-  });
-
-  const [allUsers, setAllUsers] = useState<UserProfile[]>(() => {
-    const saved = localStorage.getItem('alight_all_users');
-    return saved ? JSON.parse(saved) : [DEFAULT_ADMIN_PROFILE, DEFAULT_VIP_PROFILE];
-  });
-
-  const [amLogs, setAmLogs] = useState<AMLog[]>(() => {
-    const saved = localStorage.getItem('alight_am_logs');
-    return saved ? JSON.parse(saved) : [
-      {
-        id: 'log-1',
-        user_id: 'user-rizky-vip',
-        target_email: 'rizky.project2026@gmail.com',
-        created_at: new Date(Date.now() - 3600000 * 5).toISOString()
-      },
-      {
-        id: 'log-2',
-        user_id: 'user-admin-wahid',
-        target_email: 'alca.tester@yahoo.com',
-        created_at: new Date(Date.now() - 3600000 * 12).toISOString()
+    try {
+      const saved = localStorage.getItem('alight_current_user');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.email === 'wahidrahmannn1324@gmail.com') {
+          parsed.username = 'AlcaW44';
+          parsed.role = 'admin';
+          localStorage.setItem('alight_current_user', JSON.stringify(parsed));
+        }
+        return parsed;
       }
-    ];
+    } catch (e) {
+      console.warn('Failed parsing current user from localStorage');
+    }
+    return null;
   });
 
+  // Only real user (Admin AlcaW44 initially), NO dummy/mock users!
+  const [allUsers, setAllUsers] = useState<UserProfile[]>(() => {
+    try {
+      const saved = localStorage.getItem('alight_all_users');
+      if (saved) {
+        const parsed: UserProfile[] = JSON.parse(saved);
+        // Strict filter: keep only admin and non-dummy users
+        const cleaned = parsed.filter(u => 
+          u.email === 'wahidrahmannn1324@gmail.com' || 
+          (!u.id.includes('rizky') && !u.id.includes('demo') && !u.username.toLowerCase().includes('rizky') && !u.username.toLowerCase().includes('budi'))
+        );
+        if (cleaned.length > 0) {
+          return cleaned.map(u => {
+            if (u.email === 'wahidrahmannn1324@gmail.com') {
+              return { ...u, username: 'AlcaW44', role: 'admin', daily_limit: 9999 };
+            }
+            return u;
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Failed parsing all users from localStorage');
+    }
+    return [DEFAULT_ADMIN_PROFILE];
+  });
+
+  // Riwayat AM Logs: mulai dari 0 karena belum ada akun yang dibuat oleh user
+  const [amLogs, setAmLogs] = useState<AMLog[]>(() => {
+    try {
+      const saved = localStorage.getItem('alight_am_logs');
+      if (saved) {
+        const parsed: AMLog[] = JSON.parse(saved);
+        return parsed.filter(l => l.id !== 'log-1' && l.id !== 'log-2');
+      }
+    } catch (e) {
+      console.warn('Failed parsing am logs from localStorage');
+    }
+    return [];
+  });
+
+  // Presets: mulai dari 0 karena pengguna lain belum ada
   const [presets, setPresets] = useState<Preset[]>(() => {
-    const saved = localStorage.getItem('alight_presets');
-    return saved ? JSON.parse(saved) : INITIAL_PRESETS;
+    try {
+      const saved = localStorage.getItem('alight_presets');
+      if (saved) {
+        const parsed: Preset[] = JSON.parse(saved);
+        return parsed.filter(p => !p.id.startsWith('preset-demo-') && !p.id.startsWith('preset-1') && !p.id.startsWith('preset-2') && !p.id.startsWith('preset-3'));
+      }
+    } catch (e) {}
+    return INITIAL_PRESETS;
   });
 
+  // Live Chats: mulai dari 0
   const [chats, setChats] = useState<ChatMessage[]>(() => {
-    const saved = localStorage.getItem('alight_chats');
-    return saved ? JSON.parse(saved) : INITIAL_CHATS;
+    try {
+      const saved = localStorage.getItem('alight_chats');
+      if (saved) {
+        const parsed: ChatMessage[] = JSON.parse(saved);
+        return parsed.filter(c => !c.id.startsWith('chat-1') && !c.id.startsWith('chat-2') && !c.id.startsWith('chat-3'));
+      }
+    } catch (e) {}
+    return INITIAL_CHATS;
   });
 
+  // Gallery: mulai dari 0
   const [gallery, setGallery] = useState<GalleryItem[]>(() => {
-    const saved = localStorage.getItem('alight_gallery');
-    return saved ? JSON.parse(saved) : INITIAL_GALLERY;
+    try {
+      const saved = localStorage.getItem('alight_gallery');
+      if (saved) {
+        const parsed: GalleryItem[] = JSON.parse(saved);
+        return parsed.filter(g => !g.id.startsWith('gallery-1') && !g.id.startsWith('gallery-2') && !g.id.startsWith('gallery-3'));
+      }
+    } catch (e) {}
+    return INITIAL_GALLERY;
   });
 
+  // Redeem Codes: mulai dari 0
   const [redeemCodes, setRedeemCodes] = useState<RedeemCode[]>(() => {
-    const saved = localStorage.getItem('alight_redeem_codes');
-    return saved ? JSON.parse(saved) : INITIAL_REDEEM_CODES;
+    try {
+      const saved = localStorage.getItem('alight_redeem_codes');
+      if (saved) {
+        const parsed: RedeemCode[] = JSON.parse(saved);
+        return parsed.filter(r => r.code !== 'ALCAPREM2026' && r.code !== 'RAMADHANVIP' && r.code !== 'ALCAW44SPECIAL');
+      }
+    } catch (e) {}
+    return INITIAL_REDEEM_CODES;
   });
 
   const [claimedCodes, setClaimedCodes] = useState<string[]>(() => {
@@ -129,6 +184,93 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const [pendingReferral, setPendingReferral] = useState<string | null>(null);
+
+  // BroadcastChannel reference
+  const channelRef = useRef<BroadcastChannel | null>(null);
+
+  useEffect(() => {
+    channelRef.current = getRealtimeChannel();
+    if (channelRef.current) {
+      channelRef.current.onmessage = (event) => {
+        const { type, payload } = event.data || {};
+        if (type === 'SYNC_ALL') {
+          if (payload.chats) setChats(payload.chats);
+          if (payload.presets) setPresets(payload.presets);
+          if (payload.gallery) setGallery(payload.gallery);
+          if (payload.amLogs) setAmLogs(payload.amLogs);
+          if (payload.redeemCodes) setRedeemCodes(payload.redeemCodes);
+          if (payload.users) {
+            setAllUsers(payload.users);
+            setCurrentUser(curr => {
+              if (!curr) return null;
+              const fresh = payload.users.find((u: UserProfile) => u.id === curr.id || u.email === curr.email);
+              return fresh ? { ...curr, ...fresh } : curr;
+            });
+          }
+        }
+      };
+    }
+
+    return () => {
+      channelRef.current?.close();
+    };
+  }, []);
+
+  // REAL-TIME SYNC POLLING: Fetch from server every 2500ms
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchRealtimeSync = async () => {
+      try {
+        const res = await fetch('/api/realtime/sync');
+        if (!res.ok) return;
+        const result = await res.json();
+        if (!result.success || !result.data || !isMounted) return;
+
+        const data = result.data;
+        if (Array.isArray(data.chats)) setChats(data.chats);
+        if (Array.isArray(data.presets)) setPresets(data.presets);
+        if (Array.isArray(data.gallery)) setGallery(data.gallery);
+        if (Array.isArray(data.amLogs)) setAmLogs(data.amLogs);
+        if (Array.isArray(data.redeemCodes)) setRedeemCodes(data.redeemCodes);
+        if (Array.isArray(data.users) && data.users.length > 0) {
+          setAllUsers(data.users);
+          setCurrentUser(curr => {
+            if (!curr) return null;
+            const fresh = data.users.find((u: UserProfile) => u.id === curr.id || u.email === curr.email);
+            return fresh ? { ...curr, ...fresh } : curr;
+          });
+        }
+      } catch (e) {
+        // Silent catch for offline or non-blocking network lag
+      }
+    };
+
+    fetchRealtimeSync();
+    const interval = setInterval(fetchRealtimeSync, 2500);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Broadcast helper
+  const broadcastSync = (payload: {
+    chats?: ChatMessage[];
+    presets?: Preset[];
+    gallery?: GalleryItem[];
+    amLogs?: AMLog[];
+    redeemCodes?: RedeemCode[];
+    users?: UserProfile[];
+  }) => {
+    try {
+      channelRef.current?.postMessage({
+        type: 'SYNC_ALL',
+        payload
+      });
+    } catch (e) {}
+  };
 
   // Check URL query for referral link e.g., ?code=username or ?coderedeem=username
   useEffect(() => {
@@ -166,7 +308,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const profileObj: UserProfile = {
             id: session.user.id,
             email: userEmail,
-            username: isSuperAdminEmail ? 'SuperAdmin_Alca' : username,
+            username: isSuperAdminEmail ? 'AlcaW44' : username,
             avatar_url: session.user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${username}`,
             role: isSuperAdminEmail ? 'admin' : 'free',
             daily_limit: isSuperAdminEmail ? 9999 : 5,
@@ -178,12 +320,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setCurrentUser(profileObj);
           setAllUsers(prev => {
             const existing = prev.find(u => u.id === profileObj.id || u.email === profileObj.email);
-            if (existing) {
-              return prev.map(u => (u.id === profileObj.id || u.email === profileObj.email) ? profileObj : u);
-            }
-            return [profileObj, ...prev];
+            const updated = existing ? prev.map(u => (u.id === profileObj.id || u.email === profileObj.email) ? profileObj : u) : [profileObj, ...prev];
+            broadcastSync({ users: updated });
+            return updated;
           });
           setAuthCookies(profileObj);
+
+          // Sync to server
+          fetch('/api/realtime/users/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user: profileObj })
+          }).catch(() => {});
         }
       });
 
@@ -285,14 +433,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     ) {
       const adminProfile = checkDailyResetForProfile({
         ...DEFAULT_ADMIN_PROFILE,
+        username: 'AlcaW44',
         email: 'wahidrahmannn1324@gmail.com'
       });
       setCurrentUser(adminProfile);
       setAllUsers(prev => {
-        if (!prev.find(u => u.id === adminProfile.id)) return [adminProfile, ...prev];
-        return prev.map(u => u.id === adminProfile.id ? adminProfile : u);
+        const next = !prev.find(u => u.id === adminProfile.id) ? [adminProfile, ...prev] : prev.map(u => u.id === adminProfile.id ? adminProfile : u);
+        broadcastSync({ users: next });
+        return next;
       });
       setAuthCookies(adminProfile);
+
+      fetch('/api/realtime/users/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user: adminProfile })
+      }).catch(() => {});
+
       return { success: true, message: 'Selamat datang kembali, SuperAdmin (wahidrahmannn1324@gmail.com)!' };
     }
 
@@ -333,7 +490,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const loggedUser: UserProfile = {
             id: data.user.id,
             email: userEmail,
-            username: isSuper ? 'SuperAdmin_Alca' : (data.user.user_metadata?.username || userEmail.split('@')[0]),
+            username: isSuper ? 'AlcaW44' : (data.user.user_metadata?.username || userEmail.split('@')[0]),
             avatar_url: data.user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${userEmail}`,
             role: isSuper ? 'admin' : 'free',
             daily_limit: isSuper ? 9999 : 5,
@@ -343,7 +500,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           };
 
           setCurrentUser(loggedUser);
+          setAllUsers(prev => {
+            const exists = prev.find(u => u.id === loggedUser.id || u.email === loggedUser.email);
+            const next = exists ? prev.map(u => (u.id === loggedUser.id || u.email === loggedUser.email) ? loggedUser : u) : [loggedUser, ...prev];
+            broadcastSync({ users: next });
+            return next;
+          });
           setAuthCookies(loggedUser);
+
+          fetch('/api/realtime/users/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user: loggedUser })
+          }).catch(() => {});
+
           return { success: true, message: 'Berhasil login via Supabase Auth!' };
         }
       } catch (err: any) {
@@ -391,7 +561,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const cleanEmail = email.trim().toLowerCase();
     const cleanUsername = username.trim().toLowerCase();
 
-    // Policy Rule 3: Strict Email Domain Whitelist
+    // Strict Email Domain Whitelist for Login & Register
     if (!isValidEmailDomain(cleanEmail)) {
       return {
         success: false,
@@ -427,7 +597,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const referrer = allUsers.find(u => u.username.toLowerCase() === effectiveRef);
       if (referrer) {
         initialDailyLimit += 2;
-        // Credit referrer +3
         setAllUsers(prev =>
           prev.map(u =>
             u.id === referrer.id
@@ -441,7 +610,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const newUser: UserProfile = {
       id: 'user-' + Math.random().toString(36).substring(2, 9),
       email: cleanEmail,
-      username: isSuperAdminEmail ? 'SuperAdmin_Alca' : cleanUsername,
+      username: isSuperAdminEmail ? 'AlcaW44' : cleanUsername,
       avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanUsername}`,
       role: isSuperAdminEmail ? 'admin' : 'free',
       daily_limit: initialDailyLimit,
@@ -450,9 +619,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       created_at: new Date().toISOString()
     };
 
-    setAllUsers(prev => [newUser, ...prev]);
+    setAllUsers(prev => {
+      const next = [newUser, ...prev];
+      broadcastSync({ users: next });
+      return next;
+    });
     setCurrentUser(newUser);
     setAuthCookies(newUser);
+
+    // Sync to backend store in real-time
+    fetch('/api/realtime/users/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: newUser })
+    }).catch(() => {});
 
     // If Supabase is connected, register in auth.users
     if (supabase) {
@@ -461,7 +641,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         password: pass,
         options: {
           data: {
-            username: isSuperAdminEmail ? 'SuperAdmin_Alca' : cleanUsername
+            username: isSuperAdminEmail ? 'AlcaW44' : cleanUsername
           }
         }
       }).catch(err => console.warn('Supabase signup fallback:', err));
@@ -504,8 +684,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     setCurrentUser(updated);
-    setAllUsers(prev => prev.map(u => u.id === updated.id ? updated : u));
+    setAllUsers(prev => {
+      const next = prev.map(u => u.id === updated.id ? updated : u);
+      broadcastSync({ users: next });
+      return next;
+    });
     setAuthCookies(updated);
+
+    fetch('/api/realtime/users/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: updated })
+    }).catch(() => {});
 
     return { success: true, message: 'Profil Anda berhasil diperbarui!' };
   };
@@ -513,11 +703,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const deleteAccount = async () => {
     if (!currentUser) return;
     const userId = currentUser.id;
-    setAllUsers(prev => prev.filter(u => u.id !== userId));
+    setAllUsers(prev => {
+      const next = prev.filter(u => u.id !== userId);
+      broadcastSync({ users: next });
+      return next;
+    });
     setCurrentUser(null);
     setAuthCookies(null);
   };
 
+  // Record AM log & increment used_limit_today real-time across users & admin!
   const recordAMLog = async (targetEmail: string): Promise<boolean> => {
     if (!currentUser) return false;
 
@@ -528,14 +723,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       created_at: new Date().toISOString()
     };
 
+    const newUsedCount = (currentUser.used_limit_today || 0) + 1;
+
     const updatedUser: UserProfile = {
       ...currentUser,
-      used_limit_today: currentUser.used_limit_today + 1
+      used_limit_today: newUsedCount
     };
 
     setCurrentUser(updatedUser);
-    setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+    
+    // Real-time update in allUsers table so Admin can immediately inspect the new count
+    setAllUsers(prev => {
+      const nextUsers = prev.map(u => u.id === updatedUser.id ? { ...u, used_limit_today: newUsedCount } : u);
+      broadcastSync({
+        amLogs: [newLog, ...amLogs],
+        users: nextUsers
+      });
+      return nextUsers;
+    });
     setAmLogs(prev => [newLog, ...prev]);
+
+    // Send to server real-time store
+    fetch('/api/realtime/am-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        targetEmail,
+        userId: currentUser.id,
+        username: currentUser.username,
+        avatar: currentUser.avatar_url
+      })
+    }).catch(() => {});
 
     return true;
   };
@@ -549,7 +767,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: 'Anda sudah pernah mengklaim kode ini sebelumnya.' };
     }
 
-    const foundCode = redeemCodes.find(c => c.code.toUpperCase() === cleanCode && c.is_active);
+    const foundCode = redeemCodes.find(c => c.code.toUpperCase() === cleanCode && (c.is_active ?? true));
     if (!foundCode) {
       return { success: false, message: 'Kode redeem tidak valid atau sudah tidak aktif.' };
     }
@@ -561,8 +779,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     setCurrentUser(updatedUser);
-    setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+    setAllUsers(prev => {
+      const next = prev.map(u => u.id === updatedUser.id ? updatedUser : u);
+      broadcastSync({ users: next });
+      return next;
+    });
     setClaimedCodes(prev => [...prev, `${currentUser.id}_${cleanCode}`]);
+
+    fetch('/api/realtime/users/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: updatedUser })
+    }).catch(() => {});
 
     return {
       success: true,
@@ -573,51 +801,101 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Admin Actions
   const adminSetLimit = (userId: string, newLimit: number) => {
-    setAllUsers(prev =>
-      prev.map(u => (u.id === userId ? { ...u, daily_limit: newLimit } : u))
-    );
+    setAllUsers(prev => {
+      const next = prev.map(u => (u.id === userId ? { ...u, daily_limit: newLimit } : u));
+      broadcastSync({ users: next });
+      return next;
+    });
     if (currentUser?.id === userId) {
       setCurrentUser(prev => prev ? { ...prev, daily_limit: newLimit } : null);
     }
+    fetch('/api/realtime/users/admin-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set_limit', userId, newLimit })
+    }).catch(() => {});
   };
 
   const adminBroadcastLimit = (addAmount: number) => {
-    setAllUsers(prev =>
-      prev.map(u => ({ ...u, daily_limit: u.daily_limit + addAmount }))
-    );
+    setAllUsers(prev => {
+      const next = prev.map(u => ({ ...u, daily_limit: u.daily_limit + addAmount }));
+      broadcastSync({ users: next });
+      return next;
+    });
     if (currentUser) {
       setCurrentUser(prev => prev ? { ...prev, daily_limit: prev.daily_limit + addAmount } : null);
     }
+    fetch('/api/realtime/users/admin-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'broadcast_limit', broadcastAdd: addAmount })
+    }).catch(() => {});
   };
 
   const adminResetUserLimit = (userId: string) => {
-    setAllUsers(prev =>
-      prev.map(u => (u.id === userId ? { ...u, used_limit_today: 0 } : u))
-    );
+    setAllUsers(prev => {
+      const next = prev.map(u => (u.id === userId ? { ...u, used_limit_today: 0 } : u));
+      broadcastSync({ users: next });
+      return next;
+    });
     if (currentUser?.id === userId) {
       setCurrentUser(prev => prev ? { ...prev, used_limit_today: 0 } : null);
     }
+    fetch('/api/realtime/users/admin-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reset_limit', userId })
+    }).catch(() => {});
   };
 
   const adminChangeRole = (userId: string, role: UserRole) => {
     const limit = role === 'admin' ? 9999 : role === 'vip' ? 100 : 5;
-    setAllUsers(prev =>
-      prev.map(u => (u.id === userId ? { ...u, role, daily_limit: limit } : u))
-    );
+    setAllUsers(prev => {
+      const next = prev.map(u => (u.id === userId ? { ...u, role, daily_limit: limit } : u));
+      broadcastSync({ users: next });
+      return next;
+    });
     if (currentUser?.id === userId) {
       setCurrentUser(prev => prev ? { ...prev, role, daily_limit: limit } : null);
     }
+    fetch('/api/realtime/users/admin-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'change_role', userId, role })
+    }).catch(() => {});
   };
 
   const adminAddRedeemCode = (code: string, reward: number) => {
+    const clean = code.trim().toUpperCase();
     const newCode: RedeemCode = {
-      code: code.trim().toUpperCase(),
-      created_by: currentUser?.username || 'admin',
+      code: clean,
+      created_by: currentUser?.username || 'AlcaW44',
       limit_reward: reward,
       is_active: true,
       created_at: new Date().toISOString()
     };
-    setRedeemCodes(prev => [newCode, ...prev.filter(c => c.code !== newCode.code)]);
+    setRedeemCodes(prev => {
+      const next = [newCode, ...prev.filter(c => c.code !== clean)];
+      broadcastSync({ redeemCodes: next });
+      return next;
+    });
+    fetch('/api/realtime/redeem-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: clean, limit_reward: reward })
+    }).catch(() => {});
+  };
+
+  const adminDeleteRedeemCode = (codeToDelete: string) => {
+    const clean = codeToDelete.trim().toUpperCase();
+    setRedeemCodes(prev => {
+      const next = prev.filter(c => c.code.toUpperCase() !== clean);
+      broadcastSync({ redeemCodes: next });
+      return next;
+    });
+    fetch(`/api/realtime/redeem-code/${encodeURIComponent(clean)}`, {
+      method: 'DELETE'
+    }).catch(() => {});
   };
 
   const addPreset = (title: string, link: string, previewUrl: string, category: string) => {
@@ -633,17 +911,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       downloads: 0,
       created_at: new Date().toISOString()
     };
-    setPresets(prev => [newPreset, ...prev]);
+    setPresets(prev => {
+      const next = [newPreset, ...prev];
+      broadcastSync({ presets: next });
+      return next;
+    });
+    fetch('/api/realtime/preset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: newPreset.title,
+        link: newPreset.preset_link,
+        preview_url: newPreset.preview_url,
+        category: newPreset.category,
+        user_id: currentUser.id,
+        username: currentUser.username,
+        avatar_url: currentUser.avatar_url
+      })
+    }).catch(() => {});
   };
 
   const deletePreset = (presetId: string) => {
-    setPresets(prev => prev.filter(p => p.id !== presetId));
+    setPresets(prev => {
+      const next = prev.filter(p => p.id !== presetId);
+      broadcastSync({ presets: next });
+      return next;
+    });
+    fetch(`/api/realtime/preset/${presetId}`, {
+      method: 'DELETE'
+    }).catch(() => {});
   };
 
   const incrementPresetDownload = (presetId: string) => {
     setPresets(prev =>
       prev.map(p => (p.id === presetId ? { ...p, downloads: p.downloads + 1 } : p))
     );
+    fetch(`/api/realtime/preset/${presetId}/download`, {
+      method: 'POST'
+    }).catch(() => {});
   };
 
   const sendChatMessage = (message: string) => {
@@ -657,7 +962,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       message: message.trim(),
       created_at: new Date().toISOString()
     };
-    setChats(prev => [...prev, newMsg]);
+    setChats(prev => {
+      const next = [...prev, newMsg];
+      broadcastSync({ chats: next });
+      return next;
+    });
+    fetch('/api/realtime/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: currentUser.id,
+        username: currentUser.username,
+        avatar_url: currentUser.avatar_url,
+        role: currentUser.role,
+        message: newMsg.message
+      })
+    }).catch(() => {});
   };
 
   const addGalleryItem = (imageUrl: string, caption: string) => {
@@ -672,13 +992,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       likes: 0,
       created_at: new Date().toISOString()
     };
-    setGallery(prev => [newItem, ...prev]);
+    setGallery(prev => {
+      const next = [newItem, ...prev];
+      broadcastSync({ gallery: next });
+      return next;
+    });
+    fetch('/api/realtime/gallery', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image_url: newItem.image_url,
+        caption: newItem.caption,
+        user_id: currentUser.id,
+        username: currentUser.username,
+        avatar_url: currentUser.avatar_url
+      })
+    }).catch(() => {});
   };
 
   const toggleLikeGallery = (galleryId: string) => {
     setGallery(prev =>
       prev.map(g => (g.id === galleryId ? { ...g, likes: g.likes + 1 } : g))
     );
+    fetch(`/api/realtime/gallery/${galleryId}/like`, {
+      method: 'POST'
+    }).catch(() => {});
   };
 
   return (
@@ -706,6 +1044,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         adminResetUserLimit,
         adminChangeRole,
         adminAddRedeemCode,
+        adminDeleteRedeemCode,
         addPreset,
         deletePreset,
         incrementPresetDownload,
