@@ -51,6 +51,14 @@ export const LiveChatView: React.FC<LiveChatViewProps> = ({ openAuthModal }) => 
     await sendChatMessage(text);
   };
 
+  // Filter out any mock message permanently
+  const visibleChats = chats.filter(c => 
+    c && c.message && 
+    !c.message.toLowerCase().includes('mbak siti') &&
+    !c.message.toLowerCase().includes('sound kane') &&
+    !c.message.toLowerCase().includes('preset jj')
+  );
+
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 h-[calc(100vh-10rem)] min-h-[500px] flex flex-col">
       
@@ -83,21 +91,21 @@ export const LiveChatView: React.FC<LiveChatViewProps> = ({ openAuthModal }) => 
             <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-emerald-400' : ''}`} />
           </button>
           <div className="text-xs text-slate-400 font-mono hidden sm:block bg-slate-900/60 px-3 py-1.5 rounded-lg border border-slate-800">
-            {chats.length} Pesan
+            {visibleChats.length} Pesan
           </div>
         </div>
       </div>
 
       {/* Messages Scroll Area */}
       <div className="flex-1 overflow-y-auto py-4 space-y-4 pr-1">
-        {chats.length === 0 ? (
+        {visibleChats.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-8 text-slate-500">
             <MessageSquare className="w-10 h-10 text-slate-600 mb-3" />
             <p className="text-sm font-semibold text-slate-300">Belum Ada Pesan</p>
             <p className="text-xs text-slate-500 mt-1">Jadilah yang pertama mengirim pesan di Live Chat!</p>
           </div>
         ) : (
-          chats.map((chat) => {
+          visibleChats.map((chat) => {
           const isMe = currentUser?.id === chat.user_id;
           const isAdmin = chat.role === 'admin';
           const isVip = chat.role === 'vip';

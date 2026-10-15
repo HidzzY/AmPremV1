@@ -47,7 +47,7 @@ const DEFAULT_ADMIN_USER: RealtimeUser = {
   id: 'user-admin-wahid',
   email: 'wahidrahmannn1324@gmail.com',
   username: 'AlcaW44',
-  avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+  avatar_url: '',
   role: 'admin',
   daily_limit: 9999,
   used_limit_today: 0,

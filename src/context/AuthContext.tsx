@@ -39,12 +39,11 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Primary Admin Profile locked to wahidrahmannn1324@gmail.com and username AlcaW44
 const DEFAULT_ADMIN_PROFILE: UserProfile = {
   id: 'user-admin-wahid',
   email: 'wahidrahmannn1324@gmail.com',
   username: 'AlcaW44',
-  avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+  avatar_url: '',
   role: 'admin',
   daily_limit: 9999,
   used_limit_today: 0,
@@ -86,9 +85,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const customAvatar = 
           localStorage.getItem(`alight_avatar_${parsed.id}`) || 
           localStorage.getItem(`alight_avatar_${parsed.email}`) ||
-          localStorage.getItem('alight_user_avatar');
+          (parsed.email === 'wahidrahmannn1324@gmail.com' ? localStorage.getItem('alight_user_avatar') : null);
+
         if (customAvatar) {
           parsed.avatar_url = customAvatar;
+        } else if (parsed.avatar_url && !parsed.avatar_url.includes('images.unsplash.com')) {
+          try {
+            localStorage.setItem(`alight_avatar_${parsed.id}`, parsed.avatar_url);
+            localStorage.setItem(`alight_avatar_${parsed.email}`, parsed.avatar_url);
+            if (parsed.email === 'wahidrahmannn1324@gmail.com') {
+              localStorage.setItem('alight_user_avatar', parsed.avatar_url);
+            }
+          } catch {}
         }
         localStorage.setItem('alight_current_user', JSON.stringify(parsed));
         return parsed;
@@ -138,13 +146,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const adminCustomAvatar = 
-      localStorage.getItem('alight_avatar_user-admin-wahid') || 
+      localStorage.getItem('alight_user_avatar') || 
       localStorage.getItem('alight_avatar_wahidrahmannn1324@gmail.com') ||
-      localStorage.getItem('alight_user_avatar');
+      localStorage.getItem('alight_avatar_user-admin-wahid') ||
+      'https://api.dicebear.com/7.x/bottts/svg?seed=AlcaW44';
 
     return [{
       ...DEFAULT_ADMIN_PROFILE,
-      avatar_url: adminCustomAvatar || DEFAULT_ADMIN_PROFILE.avatar_url
+      avatar_url: adminCustomAvatar
     }];
   });
 
@@ -259,14 +268,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Helper to preserve user's custom avatar so it's NEVER overwritten by server defaults
   const enrichUsersWithCustomAvatars = (userList: UserProfile[]): UserProfile[] => {
     return userList.map(u => {
+      const isSuperAdmin = u.email === 'wahidrahmannn1324@gmail.com';
       const customAvatar = 
         localStorage.getItem(`alight_avatar_${u.id}`) || 
         localStorage.getItem(`alight_avatar_${u.email}`) || 
-        (u.email === 'wahidrahmannn1324@gmail.com' ? localStorage.getItem('alight_user_avatar') : null);
-      if (customAvatar) {
-        return { ...u, avatar_url: customAvatar };
+        (isSuperAdmin ? localStorage.getItem('alight_user_avatar') : null);
+
+      let finalAvatar = customAvatar || u.avatar_url;
+      if (!finalAvatar || finalAvatar.includes('images.unsplash.com')) {
+        finalAvatar = customAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${isSuperAdmin ? 'AlcaW44' : u.username}`;
       }
-      return u;
+
+      if (isSuperAdmin) {
+        return {
+          ...u,
+          username: 'AlcaW44',
+          role: 'admin',
+          daily_limit: 9999,
+          avatar_url: finalAvatar
+        };
+      }
+
+      return {
+        ...u,
+        avatar_url: finalAvatar
+      };
     });
   };
 
@@ -275,16 +301,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const fresh = serverUsers.find((u: UserProfile) => u.id === curr.id || u.email === curr.email);
     if (!fresh) return curr;
 
+    const isSuperAdmin = curr.email === 'wahidrahmannn1324@gmail.com';
+
     const customAvatar = 
       localStorage.getItem(`alight_avatar_${curr.id}`) || 
       localStorage.getItem(`alight_avatar_${curr.email}`) || 
-      localStorage.getItem('alight_user_avatar') || 
-      (curr.avatar_url && !curr.avatar_url.includes('images.unsplash.com/photo-1535713875002-d1d0cf377fde') ? curr.avatar_url : null);
+      (isSuperAdmin ? localStorage.getItem('alight_user_avatar') : null) || 
+      (curr.avatar_url && !curr.avatar_url.includes('images.unsplash.com') ? curr.avatar_url : null);
+
+    const chosenAvatar = customAvatar || (curr.avatar_url && !curr.avatar_url.includes('images.unsplash.com') ? curr.avatar_url : (fresh.avatar_url || curr.avatar_url));
 
     return {
       ...curr,
       ...fresh,
-      avatar_url: customAvatar || fresh.avatar_url || curr.avatar_url
+      id: curr.id, // Keep the active client session ID
+      username: isSuperAdmin ? 'AlcaW44' : (curr.username || fresh.username),
+      avatar_url: chosenAvatar,
+      role: isSuperAdmin ? 'admin' : (fresh.role || curr.role),
+      daily_limit: isSuperAdmin ? 9999 : (fresh.daily_limit || curr.daily_limit),
+      used_limit_today: fresh.used_limit_today !== undefined ? fresh.used_limit_today : curr.used_limit_today
     };
   };
 
@@ -496,21 +531,57 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           // Check if admin email
           const isSuperAdminEmail = userEmail === 'wahidrahmannn1324@gmail.com';
-          const username = session.user.user_metadata?.username || 
-                           session.user.user_metadata?.name || 
-                           userEmail.split('@')[0];
+          const defaultUsername = session.user.user_metadata?.username || 
+                                  session.user.user_metadata?.name || 
+                                  userEmail.split('@')[0];
+
+          // Check for existing custom avatar in localStorage or current state
+          let savedAvatar = 
+            localStorage.getItem(`alight_avatar_${session.user.id}`) ||
+            localStorage.getItem(`alight_avatar_${userEmail}`) ||
+            (isSuperAdminEmail ? localStorage.getItem('alight_user_avatar') : null);
+
+          // If no specific avatar key, check existing alight_current_user in localStorage
+          let savedUserObj: UserProfile | null = null;
+          try {
+            const rawSaved = localStorage.getItem('alight_current_user');
+            if (rawSaved) savedUserObj = JSON.parse(rawSaved);
+          } catch {}
+
+          if (!savedAvatar && savedUserObj && (savedUserObj.id === session.user.id || savedUserObj.email === userEmail)) {
+            if (savedUserObj.avatar_url && !savedUserObj.avatar_url.includes('images.unsplash.com/photo-1535713875002-d1d0cf377fde')) {
+              savedAvatar = savedUserObj.avatar_url;
+            }
+          }
+
+          const finalAvatar = 
+            savedAvatar || 
+            session.user.user_metadata?.avatar_url || 
+            `https://api.dicebear.com/7.x/bottts/svg?seed=${defaultUsername}`;
+
+          const existingUsername = (savedUserObj && (savedUserObj.id === session.user.id || savedUserObj.email === userEmail)) ? savedUserObj.username : null;
+          const finalUsername = isSuperAdminEmail ? 'AlcaW44' : (existingUsername || session.user.user_metadata?.username || defaultUsername);
 
           const profileObj: UserProfile = {
             id: session.user.id,
             email: userEmail,
-            username: isSuperAdminEmail ? 'AlcaW44' : username,
-            avatar_url: session.user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${username}`,
-            role: isSuperAdminEmail ? 'admin' : 'free',
-            daily_limit: isSuperAdminEmail ? 9999 : 5,
-            used_limit_today: 0,
-            last_limit_reset: new Date().toISOString(),
-            created_at: new Date().toISOString()
+            username: finalUsername,
+            avatar_url: finalAvatar,
+            role: isSuperAdminEmail ? 'admin' : (savedUserObj?.role || 'free'),
+            daily_limit: isSuperAdminEmail ? 9999 : (savedUserObj?.daily_limit || 5),
+            used_limit_today: savedUserObj?.used_limit_today || 0,
+            last_limit_reset: savedUserObj?.last_limit_reset || new Date().toISOString(),
+            created_at: savedUserObj?.created_at || new Date().toISOString()
           };
+
+          // Cache custom avatar to all key variants so it persists forever
+          if (finalAvatar && !finalAvatar.includes('images.unsplash.com')) {
+            try {
+              localStorage.setItem(`alight_avatar_${session.user.id}`, finalAvatar);
+              localStorage.setItem(`alight_avatar_${userEmail}`, finalAvatar);
+              if (isSuperAdminEmail) localStorage.setItem('alight_user_avatar', finalAvatar);
+            } catch {}
+          }
 
           setCurrentUser(profileObj);
           setAllUsers(prev => {
@@ -521,7 +592,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           });
           setAuthCookies(profileObj);
 
-          // Sync to server
+          // Sync to server silently (safe across Vercel & Node)
           fetch('/api/realtime/users/sync', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -887,22 +958,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const updatedAvatar = avatarUrl.trim() || currentUser.avatar_url;
 
-    // Persist custom avatar permanently in local storage across sessions
+    const updated: UserProfile = {
+      ...currentUser,
+      username: cleanUsername,
+      avatar_url: updatedAvatar
+    };
+
+    // Persist custom avatar and user profile permanently in local storage across sessions
     try {
       localStorage.setItem(`alight_avatar_${currentUser.id}`, updatedAvatar);
       localStorage.setItem(`alight_avatar_${currentUser.email}`, updatedAvatar);
       if (currentUser.email === 'wahidrahmannn1324@gmail.com') {
         localStorage.setItem('alight_user_avatar', updatedAvatar);
       }
+      localStorage.setItem('alight_current_user', JSON.stringify(updated));
     } catch (e) {
       console.warn('LocalStorage save avatar error:', e);
     }
-
-    const updated: UserProfile = {
-      ...currentUser,
-      username: cleanUsername,
-      avatar_url: updatedAvatar
-    };
 
     setCurrentUser(updated);
     setAllUsers(prev => {
@@ -911,6 +983,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return next;
     });
     setAuthCookies(updated);
+
+    // If Supabase session exists, update user metadata so auth refresh retains the new photo
+    if (supabase) {
+      supabase.auth.updateUser({
+        data: {
+          avatar_url: updatedAvatar,
+          username: cleanUsername
+        }
+      }).catch(() => {});
+    }
 
     // Sync to backend real-time store (try /users/sync and fallback to /profile)
     const syncPayload = JSON.stringify({ user: updated });
