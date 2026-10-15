@@ -13,7 +13,19 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
-app.use(express.json({ limit: '15mb' }));
+app.use(express.json({ limit: '30mb' }));
+app.use(express.urlencoded({ extended: true, limit: '30mb' }));
+
+// Global CORS & preflight header support for custom domains, reverse proxies, and browsers
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
 
 // In-Memory & File-backed Real-time state store
 const DATA_DIR = path.resolve(__dirname, '.data');
@@ -118,7 +130,12 @@ try {
     const parsed = JSON.parse(raw);
     if (parsed) {
       realtimeState = {
-        chats: Array.isArray(parsed.chats) ? parsed.chats : [],
+        chats: (Array.isArray(parsed.chats) ? parsed.chats : []).filter((c: any) => 
+          c && c.message && 
+          !c.message.toLowerCase().includes('mbak siti') &&
+          !c.message.toLowerCase().includes('sound kane') &&
+          !c.message.toLowerCase().includes('preset jj')
+        ),
         presets: Array.isArray(parsed.presets) ? parsed.presets : [],
         gallery: Array.isArray(parsed.gallery) ? parsed.gallery : [],
         amLogs: Array.isArray(parsed.amLogs) ? parsed.amLogs : [],
@@ -299,10 +316,11 @@ function broadcastSSE(type: string, data: any) {
 
 // GET /api/realtime/stream -> Real-time Server-Sent Events stream for all connected browsers
 app.get('/api/realtime/stream', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform, no-store, must-revalidate');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.flushHeaders?.();
 
   // Send initial snapshot immediately upon connection
@@ -487,36 +505,60 @@ app.post('/api/realtime/am-log', (req, res) => {
   res.json({ success: true, log: newLog, amLogs: realtimeState.amLogs, users: realtimeState.users });
 });
 
-// POST /api/realtime/users/sync -> Sync user profile into server user list & broadcast
-app.post('/api/realtime/users/sync', (req, res) => {
-  const { user } = req.body;
-  if (!user || !user.id) {
+// POST & PUT /api/realtime/users/sync & /api/realtime/profile -> Sync user profile into server user list & broadcast
+const handleUserSync = (req: express.Request, res: express.Response) => {
+  const user = req.body?.user || req.body;
+  if (!user || (!user.id && !user.email)) {
     return res.status(400).json({ success: false, message: 'Invalid user payload' });
   }
 
-  const existingIdx = realtimeState.users.findIndex(u => u.id === user.id || u.email === user.email);
+  const existingIdx = realtimeState.users.findIndex(u => 
+    (user.id && u.id === user.id) || 
+    (user.email && u.email && u.email.toLowerCase() === String(user.email).toLowerCase())
+  );
+
+  const cleanAvatar = user.avatar_url && typeof user.avatar_url === 'string' && user.avatar_url.trim() 
+    ? user.avatar_url.trim() 
+    : undefined;
+
   if (existingIdx !== -1) {
-    // Preserve server-authoritative used_limit_today and daily_limit if already tracked
     const existing = realtimeState.users[existingIdx];
+    const isWahid = (user.email && user.email.toLowerCase() === 'wahidrahmannn1324@gmail.com') || 
+                    (existing.email && existing.email.toLowerCase() === 'wahidrahmannn1324@gmail.com');
+
     realtimeState.users[existingIdx] = {
+      ...existing,
       ...user,
+      avatar_url: cleanAvatar || existing.avatar_url,
       used_limit_today: Math.max(existing.used_limit_today || 0, user.used_limit_today || 0),
-      daily_limit: existing.daily_limit || user.daily_limit || 5,
-      role: user.email === 'wahidrahmannn1324@gmail.com' ? 'admin' : (existing.role || user.role || 'free'),
-      username: user.email === 'wahidrahmannn1324@gmail.com' ? 'AlcaW44' : user.username
+      daily_limit: existing.daily_limit || user.daily_limit || (isWahid ? 9999 : 5),
+      role: isWahid ? 'admin' : (existing.role || user.role || 'free'),
+      username: isWahid ? 'AlcaW44' : (user.username || existing.username)
     };
   } else {
+    const isWahid = user.email && user.email.toLowerCase() === 'wahidrahmannn1324@gmail.com';
     realtimeState.users.push({
-      ...user,
-      role: user.email === 'wahidrahmannn1324@gmail.com' ? 'admin' : (user.role || 'free'),
-      username: user.email === 'wahidrahmannn1324@gmail.com' ? 'AlcaW44' : user.username
+      id: user.id || 'user-' + Date.now(),
+      email: user.email || '',
+      username: isWahid ? 'AlcaW44' : (user.username || 'User'),
+      avatar_url: cleanAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.username || 'user'}`,
+      role: isWahid ? 'admin' : (user.role || 'free'),
+      daily_limit: isWahid ? 9999 : (user.daily_limit || 5),
+      used_limit_today: user.used_limit_today || 0,
+      last_limit_reset: user.last_limit_reset || new Date().toISOString(),
+      created_at: user.created_at || new Date().toISOString()
     });
   }
 
   persistState();
   broadcastSSE('USERS_UPDATED', { users: realtimeState.users });
   res.json({ success: true, users: realtimeState.users });
-});
+};
+
+app.post('/api/realtime/users/sync', handleUserSync);
+app.put('/api/realtime/users/sync', handleUserSync);
+app.post('/api/realtime/profile', handleUserSync);
+app.put('/api/realtime/profile', handleUserSync);
 
 // POST /api/realtime/users/admin-action -> Admin changes limit, resets limit, or changes role
 app.post('/api/realtime/users/admin-action', (req, res) => {

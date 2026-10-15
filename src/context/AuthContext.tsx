@@ -81,8 +81,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (parsed.email === 'wahidrahmannn1324@gmail.com') {
           parsed.username = 'AlcaW44';
           parsed.role = 'admin';
-          localStorage.setItem('alight_current_user', JSON.stringify(parsed));
         }
+        // Restore custom avatar from persistent user key
+        const customAvatar = 
+          localStorage.getItem(`alight_avatar_${parsed.id}`) || 
+          localStorage.getItem(`alight_avatar_${parsed.email}`) ||
+          localStorage.getItem('alight_user_avatar');
+        if (customAvatar) {
+          parsed.avatar_url = customAvatar;
+        }
+        localStorage.setItem('alight_current_user', JSON.stringify(parsed));
         return parsed;
       }
     } catch (e) {
@@ -104,17 +112,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         );
         if (cleaned.length > 0) {
           return cleaned.map(u => {
+            const customAvatar = 
+              localStorage.getItem(`alight_avatar_${u.id}`) || 
+              localStorage.getItem(`alight_avatar_${u.email}`) ||
+              (u.email === 'wahidrahmannn1324@gmail.com' ? localStorage.getItem('alight_user_avatar') : null);
+
             if (u.email === 'wahidrahmannn1324@gmail.com') {
-              return { ...u, username: 'AlcaW44', role: 'admin', daily_limit: 9999 };
+              return { 
+                ...u, 
+                username: 'AlcaW44', 
+                role: 'admin', 
+                daily_limit: 9999,
+                avatar_url: customAvatar || u.avatar_url
+              };
             }
-            return u;
+            return {
+              ...u,
+              avatar_url: customAvatar || u.avatar_url
+            };
           });
         }
       }
     } catch (e) {
       console.warn('Failed parsing all users from localStorage');
     }
-    return [DEFAULT_ADMIN_PROFILE];
+
+    const adminCustomAvatar = 
+      localStorage.getItem('alight_avatar_user-admin-wahid') || 
+      localStorage.getItem('alight_avatar_wahidrahmannn1324@gmail.com') ||
+      localStorage.getItem('alight_user_avatar');
+
+    return [{
+      ...DEFAULT_ADMIN_PROFILE,
+      avatar_url: adminCustomAvatar || DEFAULT_ADMIN_PROFILE.avatar_url
+    }];
   });
 
   // Riwayat AM Logs: mulai dari 0 karena belum ada akun yang dibuat oleh user
@@ -143,13 +174,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return INITIAL_PRESETS;
   });
 
-  // Live Chats: mulai dari 0 (hanya chat nyata antar-user)
+  // Live Chats: mulai dari 0 (hanya chat nyata, bersihkan chat mock seperti "mbak siti" / "sound kane")
   const [chats, setChats] = useState<ChatMessage[]>(() => {
     try {
       const saved = localStorage.getItem('alight_chats');
       if (saved) {
         const parsed: ChatMessage[] = JSON.parse(saved);
-        return parsed.filter(c => c && c.id && c.message && !['chat-1', 'chat-2', 'chat-3'].includes(c.id));
+        const filtered = parsed.filter(c => 
+          c && c.id && c.message && 
+          !['chat-1', 'chat-2', 'chat-3'].includes(c.id) &&
+          !c.message.toLowerCase().includes('mbak siti') &&
+          !c.message.toLowerCase().includes('sound kane') &&
+          !c.message.toLowerCase().includes('preset jj')
+        );
+        localStorage.setItem('alight_chats', JSON.stringify(filtered));
+        return filtered;
       }
     } catch (e) {}
     return INITIAL_CHATS;
@@ -217,6 +256,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
+  // Helper to preserve user's custom avatar so it's NEVER overwritten by server defaults
+  const enrichUsersWithCustomAvatars = (userList: UserProfile[]): UserProfile[] => {
+    return userList.map(u => {
+      const customAvatar = 
+        localStorage.getItem(`alight_avatar_${u.id}`) || 
+        localStorage.getItem(`alight_avatar_${u.email}`) || 
+        (u.email === 'wahidrahmannn1324@gmail.com' ? localStorage.getItem('alight_user_avatar') : null);
+      if (customAvatar) {
+        return { ...u, avatar_url: customAvatar };
+      }
+      return u;
+    });
+  };
+
+  const mergeCurrentUserWithServer = (curr: UserProfile | null, serverUsers: UserProfile[]): UserProfile | null => {
+    if (!curr) return null;
+    const fresh = serverUsers.find((u: UserProfile) => u.id === curr.id || u.email === curr.email);
+    if (!fresh) return curr;
+
+    const customAvatar = 
+      localStorage.getItem(`alight_avatar_${curr.id}`) || 
+      localStorage.getItem(`alight_avatar_${curr.email}`) || 
+      localStorage.getItem('alight_user_avatar') || 
+      (curr.avatar_url && !curr.avatar_url.includes('images.unsplash.com/photo-1535713875002-d1d0cf377fde') ? curr.avatar_url : null);
+
+    return {
+      ...curr,
+      ...fresh,
+      avatar_url: customAvatar || fresh.avatar_url || curr.avatar_url
+    };
+  };
+
+  const filterCleanChats = (chatList: ChatMessage[]): ChatMessage[] => {
+    return chatList.filter(c => 
+      c && c.id && c.message && 
+      !['chat-1', 'chat-2', 'chat-3'].includes(c.id) &&
+      !c.message.toLowerCase().includes('mbak siti') &&
+      !c.message.toLowerCase().includes('sound kane') &&
+      !c.message.toLowerCase().includes('preset jj')
+    );
+  };
+
   // MANUAL / ON-DEMAND CHAT REFRESH
   const refreshChats = async () => {
     try {
@@ -224,13 +305,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!res.ok) return;
       const result = await res.json();
       if (result.success && result.data) {
-        if (Array.isArray(result.data.chats)) setChats(result.data.chats);
+        if (Array.isArray(result.data.chats)) setChats(filterCleanChats(result.data.chats));
         if (Array.isArray(result.data.presets)) setPresets(result.data.presets);
         if (Array.isArray(result.data.gallery)) setGallery(result.data.gallery);
         if (Array.isArray(result.data.amLogs)) setAmLogs(result.data.amLogs);
         if (Array.isArray(result.data.redeemCodes)) setRedeemCodes(result.data.redeemCodes);
         if (Array.isArray(result.data.users) && result.data.users.length > 0) {
-          setAllUsers(result.data.users);
+          const enriched = enrichUsersWithCustomAvatars(result.data.users);
+          setAllUsers(enriched);
+          setCurrentUser(curr => mergeCurrentUserWithServer(curr, enriched));
         }
       }
     } catch (e) {}
@@ -249,7 +332,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         eventSource = new EventSource('/api/realtime/stream');
 
         eventSource.onopen = () => {
-          // Connected to realtime server
+          // Connected to realtime server stream
         };
 
         eventSource.onmessage = (event) => {
@@ -261,23 +344,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (parsed.type === 'CONNECTED') {
               const state = parsed.data;
               if (state) {
-                if (Array.isArray(state.chats)) setChats(state.chats);
+                if (Array.isArray(state.chats)) setChats(filterCleanChats(state.chats));
                 if (Array.isArray(state.presets)) setPresets(state.presets);
                 if (Array.isArray(state.gallery)) setGallery(state.gallery);
                 if (Array.isArray(state.amLogs)) setAmLogs(state.amLogs);
                 if (Array.isArray(state.redeemCodes)) setRedeemCodes(state.redeemCodes);
                 if (Array.isArray(state.users) && state.users.length > 0) {
-                  setAllUsers(state.users);
-                  setCurrentUser(curr => {
-                    if (!curr) return null;
-                    const fresh = state.users.find((u: UserProfile) => u.id === curr.id || u.email === curr.email);
-                    return fresh ? { ...curr, ...fresh } : curr;
-                  });
+                  const enriched = enrichUsersWithCustomAvatars(state.users);
+                  setAllUsers(enriched);
+                  setCurrentUser(curr => mergeCurrentUserWithServer(curr, enriched));
                 }
               }
             } else if (parsed.type === 'NEW_CHAT') {
               const incoming = parsed.data?.chat;
-              if (incoming && incoming.id) {
+              if (incoming && incoming.id && !incoming.message?.toLowerCase().includes('mbak siti')) {
                 setChats(prev => {
                   if (prev.some(c => c.id === incoming.id)) return prev;
                   // Replace any optimistic message with same text & user
@@ -285,7 +365,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   return [...withoutTemp, incoming];
                 });
               } else if (Array.isArray(parsed.data?.chats)) {
-                setChats(parsed.data.chats);
+                setChats(filterCleanChats(parsed.data.chats));
               }
             } else if (parsed.type === 'PRESETS_UPDATED') {
               if (Array.isArray(parsed.data?.presets)) setPresets(parsed.data.presets);
@@ -293,15 +373,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (Array.isArray(parsed.data?.gallery)) setGallery(parsed.data.gallery);
             } else if (parsed.type === 'AM_LOGS_UPDATED') {
               if (Array.isArray(parsed.data?.amLogs)) setAmLogs(parsed.data.amLogs);
-              if (Array.isArray(parsed.data?.users)) setAllUsers(parsed.data.users);
+              if (Array.isArray(parsed.data?.users)) {
+                const enriched = enrichUsersWithCustomAvatars(parsed.data.users);
+                setAllUsers(enriched);
+                setCurrentUser(curr => mergeCurrentUserWithServer(curr, enriched));
+              }
             } else if (parsed.type === 'USERS_UPDATED') {
               if (Array.isArray(parsed.data?.users)) {
-                setAllUsers(parsed.data.users);
-                setCurrentUser(curr => {
-                  if (!curr) return null;
-                  const fresh = parsed.data.users.find((u: UserProfile) => u.id === curr.id || u.email === curr.email);
-                  return fresh ? { ...curr, ...fresh } : curr;
-                });
+                const enriched = enrichUsersWithCustomAvatars(parsed.data.users);
+                setAllUsers(enriched);
+                setCurrentUser(curr => mergeCurrentUserWithServer(curr, enriched));
               }
             } else if (parsed.type === 'REDEEM_CODES_UPDATED') {
               if (Array.isArray(parsed.data?.redeemCodes)) setRedeemCodes(parsed.data.redeemCodes);
@@ -312,7 +393,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
 
         eventSource.onerror = () => {
-          // EventSource will automatically attempt reconnection
+          // If SSE connection fails or gets closed by reverse proxy, fallback polling handles all real-time sync smoothly
+          try {
+            eventSource?.close();
+          } catch {}
         };
       } catch (err) {
         console.warn('Failed connecting EventSource:', err);
@@ -330,18 +414,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!result.success || !result.data || !isMounted) return;
 
         const data = result.data;
-        if (Array.isArray(data.chats)) setChats(data.chats);
+        if (Array.isArray(data.chats)) setChats(filterCleanChats(data.chats));
         if (Array.isArray(data.presets)) setPresets(data.presets);
         if (Array.isArray(data.gallery)) setGallery(data.gallery);
         if (Array.isArray(data.amLogs)) setAmLogs(data.amLogs);
         if (Array.isArray(data.redeemCodes)) setRedeemCodes(data.redeemCodes);
         if (Array.isArray(data.users) && data.users.length > 0) {
-          setAllUsers(data.users);
-          setCurrentUser(curr => {
-            if (!curr) return null;
-            const fresh = data.users.find((u: UserProfile) => u.id === curr.id || u.email === curr.email);
-            return fresh ? { ...curr, ...fresh } : curr;
-          });
+          const enriched = enrichUsersWithCustomAvatars(data.users);
+          setAllUsers(enriched);
+          setCurrentUser(curr => mergeCurrentUserWithServer(curr, enriched));
         }
       } catch (e) {}
     };
@@ -545,10 +626,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       (cleanId === 'wahidrahmannn1324@gmail.com' || cleanId === 'alcaw44') &&
       pass === ADMIN_CREDENTIALS.password
     ) {
+      const customAvatar = 
+        localStorage.getItem('alight_avatar_user-admin-wahid') || 
+        localStorage.getItem('alight_avatar_wahidrahmannn1324@gmail.com') ||
+        localStorage.getItem('alight_user_avatar');
+
       const adminProfile = checkDailyResetForProfile({
         ...DEFAULT_ADMIN_PROFILE,
         username: 'AlcaW44',
-        email: 'wahidrahmannn1324@gmail.com'
+        email: 'wahidrahmannn1324@gmail.com',
+        avatar_url: customAvatar || DEFAULT_ADMIN_PROFILE.avatar_url
       });
       setCurrentUser(adminProfile);
       setAllUsers(prev => {
@@ -558,11 +645,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       setAuthCookies(adminProfile);
 
+      const syncPayload = JSON.stringify({ user: adminProfile });
       fetch('/api/realtime/users/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user: adminProfile })
-      }).catch(() => {});
+        body: syncPayload
+      }).catch(() => {
+        fetch('/api/realtime/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: syncPayload
+        }).catch(() => {});
+      });
 
       return { success: true, message: 'Selamat datang kembali, SuperAdmin (wahidrahmannn1324@gmail.com)!' };
     }
@@ -791,25 +885,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: 'Username sudah digunakan orang lain.' };
     }
 
+    const updatedAvatar = avatarUrl.trim() || currentUser.avatar_url;
+
+    // Persist custom avatar permanently in local storage across sessions
+    try {
+      localStorage.setItem(`alight_avatar_${currentUser.id}`, updatedAvatar);
+      localStorage.setItem(`alight_avatar_${currentUser.email}`, updatedAvatar);
+      if (currentUser.email === 'wahidrahmannn1324@gmail.com') {
+        localStorage.setItem('alight_user_avatar', updatedAvatar);
+      }
+    } catch (e) {
+      console.warn('LocalStorage save avatar error:', e);
+    }
+
     const updated: UserProfile = {
       ...currentUser,
       username: cleanUsername,
-      avatar_url: avatarUrl.trim() || currentUser.avatar_url
+      avatar_url: updatedAvatar
     };
 
     setCurrentUser(updated);
     setAllUsers(prev => {
-      const next = prev.map(u => u.id === updated.id ? updated : u);
+      const next = prev.map(u => (u.id === updated.id || u.email === updated.email) ? updated : u);
       broadcastSync({ users: next });
       return next;
     });
     setAuthCookies(updated);
 
+    // Sync to backend real-time store (try /users/sync and fallback to /profile)
+    const syncPayload = JSON.stringify({ user: updated });
     fetch('/api/realtime/users/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user: updated })
-    }).catch(() => {});
+      body: syncPayload
+    }).catch(() => {
+      fetch('/api/realtime/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: syncPayload
+      }).catch(() => {});
+    });
 
     return { success: true, message: 'Profil Anda berhasil diperbarui!' };
   };

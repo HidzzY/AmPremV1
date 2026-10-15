@@ -33,6 +33,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ openAuthModal }) => {
   const [saveMessage, setSaveMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
+  // Keep edit state synced with latest currentUser
+  React.useEffect(() => {
+    if (currentUser) {
+      setNewUsername(currentUser.username);
+      setNewAvatarUrl(currentUser.avatar_url);
+    }
+  }, [currentUser?.username, currentUser?.avatar_url]);
+
   const [copiedRef, setCopiedRef] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
@@ -48,7 +56,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ openAuthModal }) => {
       const img = new window.Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_SIZE = 300;
+        const MAX_SIZE = 250;
         let width = img.width;
         let height = img.height;
         if (width > height) {
@@ -67,7 +75,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ openAuthModal }) => {
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.drawImage(img, 0, 0, width, height);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
           setNewAvatarUrl(dataUrl);
         } else {
           setNewAvatarUrl(event.target?.result as string);
