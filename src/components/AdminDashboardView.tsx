@@ -14,11 +14,7 @@ import {
   Trash2,
   KeyRound,
   Zap,
-  Sliders,
-  UserCheck,
-  ChevronRight,
-  Edit3,
-  X
+  Clock
 } from 'lucide-react';
 
 export const AdminDashboardView: React.FC = () => {
@@ -26,7 +22,6 @@ export const AdminDashboardView: React.FC = () => {
     currentUser, 
     allUsers, 
     adminSetLimit, 
-    adminAddUserLimit,
     adminBroadcastLimit, 
     adminResetUserLimit, 
     adminChangeRole, 
@@ -37,14 +32,9 @@ export const AdminDashboardView: React.FC = () => {
   } = useAuth();
 
   const [searchUser, setSearchUser] = useState('');
-  const [selectedTargetUserId, setSelectedTargetUserId] = useState<string>('');
-  const [customAddAmount, setCustomAddAmount] = useState<number>(10);
+  const [selectedUserId, setSelectedUserId] = useState<string>('');
+  const [limitInput, setLimitInput] = useState<number>(10);
   const [broadcastAmount, setBroadcastAmount] = useState<number>(5);
-
-  // Modal / Inline Edit Limit State
-  const [editingUser, setEditingUser] = useState<{ id: string; username: string; email: string; currentLimit: number } | null>(null);
-  const [modalNewLimit, setModalNewLimit] = useState<number>(10);
-  const [modalMode, setModalMode] = useState<'add' | 'set'>('add');
 
   // Redeem code form state
   const [newCodeName, setNewCodeName] = useState('');
@@ -53,7 +43,7 @@ export const AdminDashboardView: React.FC = () => {
 
   const showNotification = (msg: string) => {
     setSuccessToast(msg);
-    setTimeout(() => setSuccessToast(null), 3500);
+    setTimeout(() => setSuccessToast(null), 3000);
   };
 
   const filteredUsers = allUsers.filter(u => 
@@ -61,28 +51,14 @@ export const AdminDashboardView: React.FC = () => {
     u.email.toLowerCase().includes(searchUser.toLowerCase())
   );
 
-  // Handle direct limit addition from dedicated form
-  const handleDedicatedAddLimit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedTargetUserId) {
-      showNotification('Pilih pengguna yang ingin ditambahkan limitnya.');
-      return;
-    }
-    const target = allUsers.find(u => u.id === selectedTargetUserId);
-    if (!target) return;
-
-    adminAddUserLimit(target.id, Number(customAddAmount));
-    showNotification(`Berhasil menambahkan +${customAddAmount} limit ke akun ${target.username}!`);
+  const handleManualAddLimit = (userId: string, currentLimit: number) => {
+    adminSetLimit(userId, currentLimit + Number(limitInput));
+    showNotification(`Limit berhasil ditambahkan ke user.`);
   };
 
-  const handleQuickAddLimit = (userId: string, username: string, amount: number) => {
-    adminAddUserLimit(userId, amount);
-    showNotification(`+${amount} Limit berhasil ditambahkan ke ${username}.`);
-  };
-
-  const handleResetLimit = (userId: string, username: string) => {
+  const handleResetLimit = (userId: string) => {
     adminResetUserLimit(userId);
-    showNotification(`Limit harian untuk ${username} berhasil direset ke 0.`);
+    showNotification(`Limit harian user berhasil direset ke 0.`);
   };
 
   const handleToggleRole = (userId: string, currentRole: UserRole) => {
@@ -100,11 +76,10 @@ export const AdminDashboardView: React.FC = () => {
 
   const handleCreateCode = (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = newCodeName.trim().toUpperCase();
-    if (!clean || newCodeReward <= 0) return;
-    adminAddRedeemCode(clean, Number(newCodeReward));
+    if (!newCodeName.trim() || newCodeReward <= 0) return;
+    adminAddRedeemCode(newCodeName.trim(), Number(newCodeReward));
     setNewCodeName('');
-    showNotification(`Kode redeem ${clean} (+${newCodeReward} limit) berhasil diaktifkan!`);
+    showNotification(`Kode redeem ${newCodeName.toUpperCase()} (+${newCodeReward} limit) aktif!`);
   };
 
   const handleDeleteCode = (codeName: string) => {
@@ -112,124 +87,14 @@ export const AdminDashboardView: React.FC = () => {
     showNotification(`Kode redeem ${codeName} berhasil dihapus.`);
   };
 
-  const openLimitModal = (u: { id: string; username: string; email: string; daily_limit: number }) => {
-    setEditingUser({ id: u.id, username: u.username, email: u.email, currentLimit: u.daily_limit });
-    setModalNewLimit(10);
-    setModalMode('add');
-  };
-
-  const handleSaveModalLimit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingUser) return;
-    if (modalMode === 'add') {
-      adminAddUserLimit(editingUser.id, Number(modalNewLimit));
-      showNotification(`+${modalNewLimit} limit berhasil ditambahkan ke ${editingUser.username}.`);
-    } else {
-      adminSetLimit(editingUser.id, Number(modalNewLimit));
-      showNotification(`Limit harian ${editingUser.username} disetel menjadi ${modalNewLimit}x.`);
-    }
-    setEditingUser(null);
-  };
-
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       
       {/* Toast Notification */}
       {successToast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-emerald-500 text-slate-950 px-4 py-3 rounded-xl shadow-2xl font-semibold text-xs flex items-center gap-2 animate-bounce border border-emerald-400">
+        <div className="fixed bottom-6 right-6 z-50 bg-emerald-500 text-slate-950 px-4 py-3 rounded-xl shadow-2xl font-semibold text-xs flex items-center gap-2 animate-bounce">
           <Check className="w-4 h-4 stroke-[3]" />
           <span>{successToast}</span>
-        </div>
-      )}
-
-      {/* Modal Atur Limit Pengguna */}
-      {editingUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6 shadow-2xl relative">
-            <button
-              onClick={() => setEditingUser(null)}
-              className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm mb-1">
-              <Sliders className="w-4 h-4" />
-              <span>Atur Kuota Limit Pengguna</span>
-            </div>
-            <p className="text-xs text-slate-400 mb-4">
-              Pengguna: <strong className="text-white">{editingUser.username}</strong> ({editingUser.email})<br />
-              Limit saat ini: <span className="text-emerald-400 font-mono font-bold">{editingUser.currentLimit}x</span>
-            </p>
-
-            <div className="flex gap-2 p-1 bg-slate-950 rounded-xl mb-4 border border-slate-800">
-              <button
-                type="button"
-                onClick={() => { setModalMode('add'); setModalNewLimit(10); }}
-                className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                  modalMode === 'add' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                + Tambah Kuota
-              </button>
-              <button
-                type="button"
-                onClick={() => { setModalMode('set'); setModalNewLimit(editingUser.currentLimit); }}
-                className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                  modalMode === 'set' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Set Total Kuota
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveModalLimit} className="space-y-4">
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1">
-                  {modalMode === 'add' ? 'Jumlah Kuota yang Ditambahkan' : 'Total Kuota Harian Baru'}
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="10000"
-                  value={modalNewLimit}
-                  onChange={(e) => setModalNewLimit(Number(e.target.value))}
-                  required
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-emerald-500 font-mono font-bold"
-                />
-              </div>
-
-              {/* Quick Chip Shortcuts */}
-              <div className="flex gap-2 flex-wrap">
-                {[5, 10, 25, 50, 100].map(amt => (
-                  <button
-                    key={amt}
-                    type="button"
-                    onClick={() => setModalNewLimit(amt)}
-                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-mono border border-slate-700"
-                  >
-                    {modalMode === 'add' ? `+${amt}` : `${amt}x`}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingUser(null)}
-                  className="flex-1 py-2 px-3 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2 px-3 rounded-xl text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 transition-colors"
-                >
-                  Simpan Perubahan
-                </button>
-              </div>
-            </form>
-          </div>
         </div>
       )}
 
@@ -245,7 +110,7 @@ export const AdminDashboardView: React.FC = () => {
               Pusat Kendali Admin (Alca W44)
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 mt-1">
-              Manajemen hak akses, penambahan kuota limit instan, broadcast massal, dan pembuatan event kode redeem.
+              Manajemen hak akses, limit kuota pengguna, broadcast massal, dan pembuatan event kode redeem.
             </p>
           </div>
 
@@ -286,168 +151,84 @@ export const AdminDashboardView: React.FC = () => {
         </div>
       </div>
 
-      {/* Grid 3 Column: Tambah Limit Pengguna, Broadcast Limit & Buat Redeem Code */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Grid 2 Column: Broadcast & Create Code */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         
-        {/* Card 1: Tambah Limit ke Pengguna Spesifik */}
-        <div className="bg-slate-900/80 border border-emerald-500/30 rounded-2xl p-5 flex flex-col justify-between shadow-lg">
-          <div>
-            <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm mb-1">
-              <Zap className="w-4 h-4" />
-              <span>Tambah Limit Pengguna</span>
-            </div>
-            <p className="text-xs text-slate-400 mb-4">
-              Pilih akun target lalu tentukan berapa bonus kuota yang ingin ditambahkan.
-            </p>
-
-            <form onSubmit={handleDedicatedAddLimit} className="space-y-3">
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Pilih Pengguna</label>
-                <select
-                  value={selectedTargetUserId}
-                  onChange={(e) => setSelectedTargetUserId(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
-                >
-                  <option value="">-- Pilih Akun User --</option>
-                  {allUsers.map(u => (
-                    <option key={u.id} value={u.id}>
-                      {u.username} ({u.email}) - Kuota: {u.daily_limit}x
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Jumlah Tambahan Kuota</label>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    min="1"
-                    max="1000"
-                    value={customAddAmount}
-                    onChange={(e) => setCustomAddAmount(Number(e.target.value))}
-                    className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono font-bold"
-                  />
-                  <button
-                    type="submit"
-                    className="py-2 px-3 rounded-xl text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 transition-colors whitespace-nowrap"
-                  >
-                    + Tambahkan
-                  </button>
-                </div>
-              </div>
-
-              {/* Quick Chip Shortcuts */}
-              <div className="flex gap-1.5 flex-wrap pt-1">
-                {[5, 10, 20, 50, 100].map(amt => (
-                  <button
-                    key={amt}
-                    type="button"
-                    onClick={() => setCustomAddAmount(amt)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-mono border border-slate-700"
-                  >
-                    +{amt}
-                  </button>
-                ))}
-              </div>
-            </form>
+        {/* Broadcast Limit to All Users */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6">
+          <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm mb-1">
+            <Radio className="w-4 h-4" />
+            <span>Broadcast Limit Massal</span>
           </div>
+          <p className="text-xs text-slate-400 mb-4">
+            Tambahkan bonus kuota instan ke SELURUH user yang terdaftar di database sekaligus.
+          </p>
+
+          <form onSubmit={handleBroadcast} className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-[11px] text-slate-400 mb-1">Jumlah Tambahan Limit</label>
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={broadcastAmount}
+                onChange={(e) => setBroadcastAmount(Number(e.target.value))}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+              />
+            </div>
+            <button
+              type="submit"
+              className="self-end py-2 px-4 rounded-xl text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 transition-colors"
+            >
+              Kirim Broadcast
+            </button>
+          </form>
         </div>
 
-        {/* Card 2: Broadcast Limit ke Semua User */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-lg">
-          <div>
-            <div className="flex items-center gap-2 text-cyan-400 font-bold text-sm mb-1">
-              <Radio className="w-4 h-4" />
-              <span>Broadcast Limit Massal</span>
-            </div>
-            <p className="text-xs text-slate-400 mb-4">
-              Tambahkan bonus kuota instan ke SELURUH {allUsers.length} user terdaftar sekaligus.
-            </p>
+        {/* Buat Custom Event Redeem Code */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6">
+          <div className="flex items-center gap-2 text-amber-400 font-bold text-sm mb-1">
+            <Gift className="w-4 h-4" />
+            <span>Buat Event Redeem Code Baru</span>
+          </div>
+          <p className="text-xs text-slate-400 mb-4">
+            Rilis kode voucher baru untuk dibagikan kepada follower saluran WhatsApp.
+          </p>
 
-            <form onSubmit={handleBroadcast} className="space-y-3">
+          <form onSubmit={handleCreateCode} className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-[11px] text-slate-400 mb-1">Jumlah Tambahan Tiap User</label>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    min="1"
-                    max="100"
-                    value={broadcastAmount}
-                    onChange={(e) => setBroadcastAmount(Number(e.target.value))}
-                    className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500 font-mono font-bold"
-                  />
-                  <button
-                    type="submit"
-                    className="py-2 px-3 rounded-xl text-xs font-bold text-slate-950 bg-cyan-400 hover:bg-cyan-300 transition-colors whitespace-nowrap"
-                  >
-                    Kirim Semua
-                  </button>
-                </div>
+                <label className="block text-[11px] text-slate-400 mb-1">Kode Voucher</label>
+                <input
+                  type="text"
+                  placeholder="MISAL: TIKTOKVIRAL"
+                  value={newCodeName}
+                  onChange={(e) => setNewCodeName(e.target.value.toUpperCase())}
+                  required
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-amber-400 uppercase font-mono"
+                />
               </div>
-
-              <div className="flex gap-1.5 flex-wrap pt-1">
-                {[5, 10, 25, 50].map(amt => (
-                  <button
-                    key={amt}
-                    type="button"
-                    onClick={() => setBroadcastAmount(amt)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-mono border border-slate-700"
-                  >
-                    +{amt} Limit
-                  </button>
-                ))}
+              <div>
+                <label className="block text-[11px] text-slate-400 mb-1">Reward Limit</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={newCodeReward}
+                  onChange={(e) => setNewCodeReward(Number(e.target.value))}
+                  required
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-amber-400 font-mono"
+                />
               </div>
-            </form>
-          </div>
-        </div>
-
-        {/* Card 3: Buat Custom Event Redeem Code */}
-        <div className="bg-slate-900/80 border border-amber-500/30 rounded-2xl p-5 flex flex-col justify-between shadow-lg">
-          <div>
-            <div className="flex items-center gap-2 text-amber-400 font-bold text-sm mb-1">
-              <Gift className="w-4 h-4" />
-              <span>Buat Event Redeem Code</span>
             </div>
-            <p className="text-xs text-slate-400 mb-4">
-              Rilis kode voucher baru untuk dibagikan kepada follower saluran WhatsApp.
-            </p>
 
-            <form onSubmit={handleCreateCode} className="space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Kode Voucher</label>
-                  <input
-                    type="text"
-                    placeholder="MISAL: TIKTOKVIRAL"
-                    value={newCodeName}
-                    onChange={(e) => setNewCodeName(e.target.value.toUpperCase())}
-                    required
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-amber-400 uppercase font-mono font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">Reward Limit</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="100"
-                    value={newCodeReward}
-                    onChange={(e) => setNewCodeReward(Number(e.target.value))}
-                    required
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-amber-400 font-mono font-bold"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2 px-3 rounded-xl text-xs font-bold text-slate-900 bg-amber-400 hover:bg-amber-300 transition-colors"
-              >
-                Aktifkan Kode Redeem
-              </button>
-            </form>
-          </div>
+            <button
+              type="submit"
+              className="w-full py-2 px-4 rounded-xl text-xs font-bold text-slate-900 bg-amber-400 hover:bg-amber-300 transition-colors"
+            >
+              Aktifkan Kode Redeem
+            </button>
+          </form>
         </div>
 
       </div>
@@ -458,10 +239,10 @@ export const AdminDashboardView: React.FC = () => {
           <div>
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <Users className="w-4 h-4 text-emerald-400" />
-              <span>Daftar Pengguna & Kontrol Limit Langsung</span>
+              <span>Daftar Pengguna & Kontrol Limit</span>
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Klik <strong className="text-emerald-400">+5</strong> / <strong className="text-emerald-400">+10</strong> untuk tambah limit cepat, atau klik <strong className="text-slate-300">Atur Limit</strong> untuk memasukkan kuota bebas.
+              Ubah role, atur kuota manual per pengguna, atau reset limit pemakaian.
             </p>
           </div>
 
@@ -474,7 +255,7 @@ export const AdminDashboardView: React.FC = () => {
                 type="text"
                 value={searchUser}
                 onChange={(e) => setSearchUser(e.target.value)}
-                placeholder="Cari user atau email..."
+                placeholder="Cari user..."
                 className="w-full pl-8 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-emerald-500"
               />
             </div>
@@ -487,9 +268,9 @@ export const AdminDashboardView: React.FC = () => {
               <tr className="border-b border-slate-800 text-slate-400">
                 <th className="py-3 px-3">Pengguna</th>
                 <th className="py-3 px-3">Role</th>
-                <th className="py-3 px-3">Limit Kuota</th>
-                <th className="py-3 px-3">Terpakai Hari Ini</th>
-                <th className="py-3 px-3 text-right">Aksi Cepat Limit</th>
+                <th className="py-3 px-3">Limit Hari Ini</th>
+                <th className="py-3 px-3">Terpakai</th>
+                <th className="py-3 px-3 text-right">Aksi Manajemen</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
@@ -498,9 +279,9 @@ export const AdminDashboardView: React.FC = () => {
                   <td className="py-3 px-3">
                     <div className="flex items-center gap-2.5">
                       <img
-                        src={u.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${u.username || 'user'}`}
+                        src={u.avatar_url}
                         alt={u.username}
-                        className="w-8 h-8 rounded-full bg-slate-800 object-cover border border-slate-700"
+                        className="w-7 h-7 rounded-full bg-slate-800 object-cover border border-slate-700"
                       />
                       <div>
                         <span className="font-semibold text-slate-200 block">{u.username}</span>
@@ -519,15 +300,14 @@ export const AdminDashboardView: React.FC = () => {
                           ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-slate-800'
                           : 'bg-slate-800 text-slate-300 hover:bg-amber-500/20 hover:text-amber-300'
                       }`}
-                      title="Klik untuk toggle VIP / Free"
+                      title="Klik untuk ubah role VIP / Free"
                     >
                       {u.role}
                     </button>
                   </td>
 
-                  <td className="py-3 px-3 font-mono text-emerald-400 font-bold tabular-nums">
-                    <span className="text-sm">{u.daily_limit}x</span>
-                    <span className="text-[10px] text-slate-400 font-normal"> /hari</span>
+                  <td className="py-3 px-3 font-mono text-emerald-400 font-semibold tabular-nums">
+                    {u.daily_limit}x/hari
                   </td>
 
                   <td className="py-3 px-3 font-mono tabular-nums">
@@ -545,39 +325,18 @@ export const AdminDashboardView: React.FC = () => {
                     </div>
                   </td>
 
-                  <td className="py-3 px-3 text-right space-x-1.5">
-                    {/* Quick +5 Limit */}
+                  <td className="py-3 px-3 text-right space-x-2">
                     <button
-                      onClick={() => handleQuickAddLimit(u.id, u.username, 5)}
-                      className="px-2 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold transition-colors"
-                      title="Tambah +5 Limit Instan"
+                      onClick={() => handleManualAddLimit(u.id, u.daily_limit)}
+                      className="px-2 py-1 rounded bg-slate-800 hover:bg-emerald-500/20 text-slate-300 hover:text-emerald-400 border border-slate-700 text-[11px] font-medium transition-colors"
+                      title="Tambah +5 Limit"
                     >
-                      +5
+                      +5 Limit
                     </button>
 
-                    {/* Quick +10 Limit */}
                     <button
-                      onClick={() => handleQuickAddLimit(u.id, u.username, 10)}
-                      className="px-2 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold transition-colors"
-                      title="Tambah +10 Limit Instan"
-                    >
-                      +10
-                    </button>
-
-                    {/* Custom Edit Limit Modal */}
-                    <button
-                      onClick={() => openLimitModal(u)}
-                      className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-medium transition-colors inline-flex items-center gap-1"
-                      title="Atur Limit Kustom"
-                    >
-                      <Edit3 className="w-3 h-3" />
-                      <span>Atur</span>
-                    </button>
-
-                    {/* Reset Limit */}
-                    <button
-                      onClick={() => handleResetLimit(u.id, u.username)}
-                      className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-amber-500/20 text-slate-400 hover:text-amber-300 border border-slate-700 text-[11px] font-medium transition-colors"
+                      onClick={() => handleResetLimit(u.id)}
+                      className="px-2 py-1 rounded bg-slate-800 hover:bg-amber-500/20 text-slate-300 hover:text-amber-300 border border-slate-700 text-[11px] font-medium transition-colors"
                       title="Reset limit hari ini ke 0"
                     >
                       Reset 0
@@ -594,7 +353,7 @@ export const AdminDashboardView: React.FC = () => {
       <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6">
         <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
           <Gift className="w-4 h-4 text-amber-400" />
-          <span>Daftar Kode Redeem Terdaftar ({redeemCodes.length})</span>
+          <span>Daftar Kode Redeem Terdaftar</span>
         </h3>
 
         {redeemCodes.length === 0 ? (
@@ -607,7 +366,7 @@ export const AdminDashboardView: React.FC = () => {
               <div key={code.code} className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl flex items-center justify-between">
                 <div>
                   <span className="font-mono text-xs font-bold text-amber-300 block">{code.code}</span>
-                  <span className="text-[10px] text-slate-400">Reward: +{code.limit_reward} Kuota Limit</span>
+                  <span className="text-[10px] text-slate-400">Reward: +{code.limit_reward} Limit</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="px-1.5 py-0.5 rounded text-[9px] bg-emerald-500/10 text-emerald-400 font-bold">

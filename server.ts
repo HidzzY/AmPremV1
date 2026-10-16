@@ -109,8 +109,6 @@ interface RealtimeState {
   redeemCodes: Array<{
     code: string;
     limit_reward: number;
-    created_by?: string;
-    is_active?: boolean;
     created_at: string;
   }>;
 }
@@ -528,16 +526,13 @@ const handleUserSync = (req: express.Request, res: express.Response) => {
     const isWahid = (user.email && user.email.toLowerCase() === 'wahidrahmannn1324@gmail.com') || 
                     (existing.email && existing.email.toLowerCase() === 'wahidrahmannn1324@gmail.com');
 
-    const incomingLimit = typeof user.daily_limit === 'number' && !isNaN(user.daily_limit) ? user.daily_limit : undefined;
-    const resolvedLimit = isWahid ? 9999 : (incomingLimit !== undefined ? Math.max(existing.daily_limit || 0, incomingLimit) : (existing.daily_limit || 5));
-
     realtimeState.users[existingIdx] = {
       ...existing,
       ...user,
       avatar_url: cleanAvatar || existing.avatar_url,
-      used_limit_today: user.used_limit_today !== undefined ? user.used_limit_today : existing.used_limit_today,
-      daily_limit: resolvedLimit,
-      role: isWahid ? 'admin' : (user.role || existing.role || 'free'),
+      used_limit_today: Math.max(existing.used_limit_today || 0, user.used_limit_today || 0),
+      daily_limit: existing.daily_limit || user.daily_limit || (isWahid ? 9999 : 5),
+      role: isWahid ? 'admin' : (existing.role || user.role || 'free'),
       username: isWahid ? 'AlcaW44' : (user.username || existing.username)
     };
   } else {
@@ -548,7 +543,7 @@ const handleUserSync = (req: express.Request, res: express.Response) => {
       username: isWahid ? 'AlcaW44' : (user.username || 'User'),
       avatar_url: cleanAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${user.username || 'user'}`,
       role: isWahid ? 'admin' : (user.role || 'free'),
-      daily_limit: isWahid ? 9999 : (Number(user.daily_limit) || 5),
+      daily_limit: isWahid ? 9999 : (user.daily_limit || 5),
       used_limit_today: user.used_limit_today || 0,
       last_limit_reset: user.last_limit_reset || new Date().toISOString(),
       created_at: user.created_at || new Date().toISOString()
@@ -567,43 +562,24 @@ app.put('/api/realtime/profile', handleUserSync);
 
 // POST /api/realtime/users/admin-action -> Admin changes limit, resets limit, or changes role
 app.post('/api/realtime/users/admin-action', (req, res) => {
-  const { action, userId, newLimit, role, broadcastAdd, targetUser } = req.body;
+  const { action, userId, newLimit, role, broadcastAdd } = req.body;
 
-  const cleanUserId = userId ? String(userId).trim().toLowerCase() : '';
-  let u = realtimeState.users.find(item => 
-    item.id === userId || 
-    (item.email && item.email.toLowerCase() === cleanUserId) ||
-    (item.username && item.username.toLowerCase() === cleanUserId)
-  );
-
-  if (!u && targetUser && (action === 'set_limit' || action === 'add_limit')) {
-    u = {
-      id: targetUser.id || userId,
-      email: targetUser.email || '',
-      username: targetUser.username || 'User',
-      avatar_url: targetUser.avatar_url || '',
-      role: targetUser.role || 'free',
-      daily_limit: targetUser.daily_limit || 5,
-      used_limit_today: targetUser.used_limit_today || 0,
-      last_limit_reset: new Date().toISOString(),
-      created_at: new Date().toISOString()
-    };
-    realtimeState.users.push(u);
-  }
-
-  if (action === 'set_limit' && u) {
-    u.daily_limit = Math.max(0, Number(newLimit) || 5);
-  } else if (action === 'add_limit' && u) {
-    u.daily_limit = (u.daily_limit || 5) + (Number(newLimit) || 5);
-  } else if (action === 'reset_limit' && u) {
-    u.used_limit_today = 0;
-    u.last_limit_reset = new Date().toISOString();
+  if (action === 'set_limit' && userId) {
+    const u = realtimeState.users.find(item => item.id === userId);
+    if (u) u.daily_limit = newLimit;
+  } else if (action === 'reset_limit' && userId) {
+    const u = realtimeState.users.find(item => item.id === userId);
+    if (u) {
+      u.used_limit_today = 0;
+      u.last_limit_reset = new Date().toISOString();
+    }
   } else if (action === 'broadcast_limit' && typeof broadcastAdd === 'number') {
-    realtimeState.users.forEach(user => {
-      user.daily_limit = (user.daily_limit || 5) + Number(broadcastAdd);
+    realtimeState.users.forEach(u => {
+      u.daily_limit = (u.daily_limit || 5) + broadcastAdd;
     });
-  } else if (action === 'change_role' && u) {
-    if (u.email !== 'wahidrahmannn1324@gmail.com') {
+  } else if (action === 'change_role' && userId && role) {
+    const u = realtimeState.users.find(item => item.id === userId);
+    if (u && u.email !== 'wahidrahmannn1324@gmail.com') {
       u.role = role;
       u.daily_limit = role === 'vip' ? 100 : role === 'admin' ? 9999 : 5;
     }
@@ -614,7 +590,7 @@ app.post('/api/realtime/users/admin-action', (req, res) => {
   res.json({ success: true, users: realtimeState.users });
 });
 
-// Redeem Codes CRUD & Claim
+// Redeem Codes CRUD
 app.post('/api/realtime/redeem-code', (req, res) => {
   const { code, limit_reward } = req.body;
   if (!code || !code.trim()) {
@@ -622,18 +598,14 @@ app.post('/api/realtime/redeem-code', (req, res) => {
   }
 
   const cleanCode = code.trim().toUpperCase();
-  const existing = realtimeState.redeemCodes.find(r => r.code.toUpperCase() === cleanCode);
-  if (existing) {
-    existing.limit_reward = Number(limit_reward) || existing.limit_reward || 10;
-    existing.is_active = true;
-    persistState();
-    broadcastSSE('REDEEM_CODES_UPDATED', { redeemCodes: realtimeState.redeemCodes });
-    return res.json({ success: true, message: 'Kode redeem diperbarui', redeemCode: existing, redeemCodes: realtimeState.redeemCodes });
+  // check exists
+  if (realtimeState.redeemCodes.some(r => r.code === cleanCode)) {
+    return res.status(400).json({ success: false, message: 'Kode redeem sudah terdaftar' });
   }
 
   const newCode = {
     code: cleanCode,
-    limit_reward: Number(limit_reward) || 10,
+    limit_reward: Number(limit_reward) || 5,
     created_at: new Date().toISOString()
   };
 
@@ -641,43 +613,6 @@ app.post('/api/realtime/redeem-code', (req, res) => {
   persistState();
   broadcastSSE('REDEEM_CODES_UPDATED', { redeemCodes: realtimeState.redeemCodes });
   res.json({ success: true, redeemCode: newCode, redeemCodes: realtimeState.redeemCodes });
-});
-
-// POST /api/realtime/redeem-code/claim -> User claims redeem code
-app.post('/api/realtime/redeem-code/claim', (req, res) => {
-  const { code, userId, userEmail, reward } = req.body;
-  const cleanCode = code ? String(code).trim().toUpperCase() : '';
-  const numReward = Number(reward) || 10;
-
-  const target = realtimeState.users.find(u => 
-    (userId && u.id === userId) || 
-    (userEmail && u.email && u.email.toLowerCase() === String(userEmail).toLowerCase())
-  );
-
-  if (target) {
-    target.daily_limit = (target.daily_limit || 5) + numReward;
-    persistState();
-    broadcastSSE('USERS_UPDATED', { users: realtimeState.users });
-  }
-
-  res.json({ success: true, message: `+${numReward} limit berhasil diklaim!` });
-});
-
-// GET /api/realtime/redeem-code -> Get active redeem codes
-app.get('/api/realtime/redeem-code', (req, res) => {
-  res.json({ success: true, redeemCodes: realtimeState.redeemCodes });
-});
-
-// GET /api/realtime/redeem-code/:code -> Check single redeem code
-app.get('/api/realtime/redeem-code/:code', (req, res) => {
-  const { code } = req.params;
-  const cleanCode = decodeURIComponent(code).trim().toUpperCase();
-  const found = realtimeState.redeemCodes.find(r => r.code.toUpperCase() === cleanCode);
-  if (found) {
-    res.json({ success: true, redeemCode: found });
-  } else {
-    res.status(404).json({ success: false, message: 'Kode redeem tidak ditemukan' });
-  }
 });
 
 // DELETE /api/realtime/redeem-code/:code -> Delete redeem code & broadcast

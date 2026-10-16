@@ -22,7 +22,6 @@ interface AuthContextType {
   recordAMLog: (targetEmail: string) => Promise<boolean>;
   claimRedeemCode: (code: string) => Promise<{ success: boolean; message: string; reward?: number }>;
   adminSetLimit: (userId: string, newLimit: number) => void;
-  adminAddUserLimit: (userId: string, addAmount: number) => void;
   adminBroadcastLimit: (addAmount: number) => void;
   adminResetUserLimit: (userId: string) => void;
   adminChangeRole: (userId: string, role: UserRole) => void;
@@ -311,21 +310,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       (curr.avatar_url && !curr.avatar_url.includes('images.unsplash.com') ? curr.avatar_url : null);
 
     const chosenAvatar = customAvatar || (curr.avatar_url && !curr.avatar_url.includes('images.unsplash.com') ? curr.avatar_url : (fresh.avatar_url || curr.avatar_url));
-    const mergedDailyLimit = isSuperAdmin ? 9999 : Math.max(fresh.daily_limit || 0, curr.daily_limit || 0);
 
-    const updatedUser: UserProfile = {
+    return {
       ...curr,
       ...fresh,
       id: curr.id, // Keep the active client session ID
       username: isSuperAdmin ? 'AlcaW44' : (curr.username || fresh.username),
       avatar_url: chosenAvatar,
       role: isSuperAdmin ? 'admin' : (fresh.role || curr.role),
-      daily_limit: mergedDailyLimit,
+      daily_limit: isSuperAdmin ? 9999 : (fresh.daily_limit || curr.daily_limit),
       used_limit_today: fresh.used_limit_today !== undefined ? fresh.used_limit_today : curr.used_limit_today
     };
-
-    try { localStorage.setItem('alight_current_user', JSON.stringify(updatedUser)); } catch (e) {}
-    return updatedUser;
   };
 
   const filterCleanChats = (chatList: ChatMessage[]): ChatMessage[] => {
@@ -336,57 +331,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       !c.message.toLowerCase().includes('sound kane') &&
       !c.message.toLowerCase().includes('preset jj')
     );
-  };
-
-  // Helper: Merges incoming server redeem codes with local codes without overwriting
-  const mergeServerRedeemCodes = (incomingCodes: RedeemCode[]) => {
-    if (!Array.isArray(incomingCodes)) return;
-    setRedeemCodes(prev => {
-      const map = new Map<string, RedeemCode>();
-      prev.forEach(c => {
-        if (c && c.code) map.set(c.code.toUpperCase(), c);
-      });
-      incomingCodes.forEach(c => {
-        if (c && c.code) {
-          const clean = c.code.toUpperCase();
-          map.set(clean, { ...map.get(clean), ...c });
-        }
-      });
-      const merged = Array.from(map.values());
-      try { localStorage.setItem('alight_redeem_codes', JSON.stringify(merged)); } catch (e) {}
-      return merged;
-    });
-  };
-
-  // Helper: Merges incoming server users with local users without reverting updated daily_limits
-  const mergeServerUsers = (incomingUsers: UserProfile[]) => {
-    if (!Array.isArray(incomingUsers) || incomingUsers.length === 0) return;
-    const enriched = enrichUsersWithCustomAvatars(incomingUsers);
-    setAllUsers(prev => {
-      const map = new Map<string, UserProfile>();
-      prev.forEach(u => {
-        if (u && u.id) map.set(u.id, u);
-      });
-      enriched.forEach(u => {
-        if (!u || !u.id) return;
-        const existing = map.get(u.id);
-        if (existing) {
-          map.set(u.id, {
-            ...existing,
-            ...u,
-            daily_limit: Math.max(existing.daily_limit || 0, u.daily_limit || 0),
-            used_limit_today: u.used_limit_today !== undefined ? u.used_limit_today : existing.used_limit_today,
-            avatar_url: existing.avatar_url?.startsWith('data:image/') ? existing.avatar_url : (u.avatar_url || existing.avatar_url)
-          });
-        } else {
-          map.set(u.id, u);
-        }
-      });
-      const merged = Array.from(map.values());
-      try { localStorage.setItem('alight_all_users', JSON.stringify(merged)); } catch (e) {}
-      return merged;
-    });
-    setCurrentUser(curr => mergeCurrentUserWithServer(curr, enriched));
   };
 
   // MANUAL / ON-DEMAND CHAT REFRESH
@@ -400,11 +344,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (Array.isArray(result.data.presets)) setPresets(result.data.presets);
         if (Array.isArray(result.data.gallery)) setGallery(result.data.gallery);
         if (Array.isArray(result.data.amLogs)) setAmLogs(result.data.amLogs);
-        if (Array.isArray(result.data.redeemCodes) && result.data.redeemCodes.length > 0) {
-          mergeServerRedeemCodes(result.data.redeemCodes);
-        }
+        if (Array.isArray(result.data.redeemCodes)) setRedeemCodes(result.data.redeemCodes);
         if (Array.isArray(result.data.users) && result.data.users.length > 0) {
-          mergeServerUsers(result.data.users);
+          const enriched = enrichUsersWithCustomAvatars(result.data.users);
+          setAllUsers(enriched);
+          setCurrentUser(curr => mergeCurrentUserWithServer(curr, enriched));
         }
       }
     } catch (e) {}
@@ -439,11 +383,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (Array.isArray(state.presets)) setPresets(state.presets);
                 if (Array.isArray(state.gallery)) setGallery(state.gallery);
                 if (Array.isArray(state.amLogs)) setAmLogs(state.amLogs);
-                if (Array.isArray(state.redeemCodes) && state.redeemCodes.length > 0) {
-                  mergeServerRedeemCodes(state.redeemCodes);
-                }
+                if (Array.isArray(state.redeemCodes)) setRedeemCodes(state.redeemCodes);
                 if (Array.isArray(state.users) && state.users.length > 0) {
-                  mergeServerUsers(state.users);
+                  const enriched = enrichUsersWithCustomAvatars(state.users);
+                  setAllUsers(enriched);
+                  setCurrentUser(curr => mergeCurrentUserWithServer(curr, enriched));
                 }
               }
             } else if (parsed.type === 'NEW_CHAT') {
@@ -451,6 +395,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (incoming && incoming.id && !incoming.message?.toLowerCase().includes('mbak siti')) {
                 setChats(prev => {
                   if (prev.some(c => c.id === incoming.id)) return prev;
+                  // Replace any optimistic message with same text & user
                   const withoutTemp = prev.filter(c => !(c.id.startsWith('temp-') && c.user_id === incoming.user_id && c.message === incoming.message));
                   return [...withoutTemp, incoming];
                 });
@@ -463,17 +408,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (Array.isArray(parsed.data?.gallery)) setGallery(parsed.data.gallery);
             } else if (parsed.type === 'AM_LOGS_UPDATED') {
               if (Array.isArray(parsed.data?.amLogs)) setAmLogs(parsed.data.amLogs);
-              if (Array.isArray(parsed.data?.users) && parsed.data.users.length > 0) {
-                mergeServerUsers(parsed.data.users);
+              if (Array.isArray(parsed.data?.users)) {
+                const enriched = enrichUsersWithCustomAvatars(parsed.data.users);
+                setAllUsers(enriched);
+                setCurrentUser(curr => mergeCurrentUserWithServer(curr, enriched));
               }
             } else if (parsed.type === 'USERS_UPDATED') {
-              if (Array.isArray(parsed.data?.users) && parsed.data.users.length > 0) {
-                mergeServerUsers(parsed.data.users);
+              if (Array.isArray(parsed.data?.users)) {
+                const enriched = enrichUsersWithCustomAvatars(parsed.data.users);
+                setAllUsers(enriched);
+                setCurrentUser(curr => mergeCurrentUserWithServer(curr, enriched));
               }
             } else if (parsed.type === 'REDEEM_CODES_UPDATED') {
-              if (Array.isArray(parsed.data?.redeemCodes) && parsed.data.redeemCodes.length > 0) {
-                mergeServerRedeemCodes(parsed.data.redeemCodes);
-              }
+              if (Array.isArray(parsed.data?.redeemCodes)) setRedeemCodes(parsed.data.redeemCodes);
             }
           } catch (e) {
             console.warn('Error parsing SSE event payload:', e);
@@ -481,6 +428,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
 
         eventSource.onerror = () => {
+          // If SSE connection fails or gets closed by reverse proxy, fallback polling handles all real-time sync smoothly
           try {
             eventSource?.close();
           } catch {}
@@ -505,11 +453,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (Array.isArray(data.presets)) setPresets(data.presets);
         if (Array.isArray(data.gallery)) setGallery(data.gallery);
         if (Array.isArray(data.amLogs)) setAmLogs(data.amLogs);
-        if (Array.isArray(data.redeemCodes) && data.redeemCodes.length > 0) {
-          mergeServerRedeemCodes(data.redeemCodes);
-        }
+        if (Array.isArray(data.redeemCodes)) setRedeemCodes(data.redeemCodes);
         if (Array.isArray(data.users) && data.users.length > 0) {
-          mergeServerUsers(data.users);
+          const enriched = enrichUsersWithCustomAvatars(data.users);
+          setAllUsers(enriched);
+          setCurrentUser(curr => mergeCurrentUserWithServer(curr, enriched));
         }
       } catch (e) {}
     };
@@ -1125,89 +1073,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!currentUser) return { success: false, message: 'Silakan login terlebih dahulu.' };
 
     const cleanCode = code.trim().toUpperCase();
-    if (!cleanCode) return { success: false, message: 'Kode redeem tidak boleh kosong.' };
 
-    if (claimedCodes.includes(`${currentUser.id}_${cleanCode}`) || claimedCodes.includes(cleanCode)) {
+    if (claimedCodes.includes(`${currentUser.id}_${cleanCode}`)) {
       return { success: false, message: 'Anda sudah pernah mengklaim kode ini sebelumnya.' };
     }
 
-    let foundCode = redeemCodes.find(c => c.code.toUpperCase() === cleanCode && (c.is_active ?? true));
-
-    // Fallback: If not found in memory, query server endpoints
-    if (!foundCode) {
-      try {
-        const res = await fetch(`/api/realtime/redeem-code/${encodeURIComponent(cleanCode)}`);
-        if (res.ok) {
-          const resData = await res.json();
-          if (resData.success && resData.redeemCode) {
-            foundCode = resData.redeemCode;
-          }
-        }
-      } catch (e) {}
-
-      // Secondary fallback: query full redeem codes list
-      if (!foundCode) {
-        try {
-          const resList = await fetch('/api/realtime/redeem-code');
-          if (resList.ok) {
-            const listData = await resList.json();
-            if (listData.success && Array.isArray(listData.redeemCodes)) {
-              mergeServerRedeemCodes(listData.redeemCodes);
-              foundCode = listData.redeemCodes.find((c: any) => c.code.toUpperCase() === cleanCode && (c.is_active ?? true));
-            }
-          }
-        } catch (e) {}
-      }
-
-      if (foundCode) {
-        setRedeemCodes(prev => {
-          const next = [foundCode!, ...prev.filter(c => c.code.toUpperCase() !== cleanCode)];
-          try { localStorage.setItem('alight_redeem_codes', JSON.stringify(next)); } catch (e) {}
-          return next;
-        });
-      }
-    }
-
+    const foundCode = redeemCodes.find(c => c.code.toUpperCase() === cleanCode && (c.is_active ?? true));
     if (!foundCode) {
       return { success: false, message: 'Kode redeem tidak valid atau sudah tidak aktif.' };
     }
 
-    const reward = Number(foundCode.limit_reward) || 10;
+    const reward = foundCode.limit_reward;
     const updatedUser: UserProfile = {
       ...currentUser,
-      daily_limit: (currentUser.daily_limit || 0) + reward
+      daily_limit: currentUser.daily_limit + reward
     };
 
     setCurrentUser(updatedUser);
-    try { localStorage.setItem('alight_current_user', JSON.stringify(updatedUser)); } catch (e) {}
-
     setAllUsers(prev => {
-      const next = prev.map(u => (u.id === updatedUser.id || u.email === updatedUser.email) ? updatedUser : u);
-      try { localStorage.setItem('alight_all_users', JSON.stringify(next)); } catch (e) {}
+      const next = prev.map(u => u.id === updatedUser.id ? updatedUser : u);
       broadcastSync({ users: next });
       return next;
     });
+    setClaimedCodes(prev => [...prev, `${currentUser.id}_${cleanCode}`]);
 
-    const newClaimed = [...claimedCodes, `${currentUser.id}_${cleanCode}`, cleanCode];
-    setClaimedCodes(newClaimed);
-    try { localStorage.setItem('alight_claimed_codes', JSON.stringify(newClaimed)); } catch (e) {}
-
-    // Synchronize to server users and claim record
     fetch('/api/realtime/users/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user: updatedUser })
-    }).catch(() => {});
-
-    fetch('/api/realtime/redeem-code/claim', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        code: cleanCode,
-        userId: currentUser.id,
-        userEmail: currentUser.email,
-        reward
-      })
     }).catch(() => {});
 
     return {
@@ -1219,95 +1112,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Admin Actions
   const adminSetLimit = (userId: string, newLimit: number) => {
-    const numLimit = Number(newLimit) || 5;
-    const target = allUsers.find(u => u.id === userId || u.email === userId);
     setAllUsers(prev => {
-      const next = prev.map(u => (u.id === userId || u.email === userId ? { ...u, daily_limit: numLimit } : u));
-      try { localStorage.setItem('alight_all_users', JSON.stringify(next)); } catch (e) {}
+      const next = prev.map(u => (u.id === userId ? { ...u, daily_limit: newLimit } : u));
       broadcastSync({ users: next });
       return next;
     });
-    if (currentUser?.id === userId || currentUser?.email === userId) {
-      setCurrentUser(prev => {
-        if (!prev) return null;
-        const updated = { ...prev, daily_limit: numLimit };
-        try { localStorage.setItem('alight_current_user', JSON.stringify(updated)); } catch (e) {}
-        return updated;
-      });
+    if (currentUser?.id === userId) {
+      setCurrentUser(prev => prev ? { ...prev, daily_limit: newLimit } : null);
     }
     fetch('/api/realtime/users/admin-action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'set_limit', userId, newLimit: numLimit, targetUser: target })
-    }).catch(() => {});
-  };
-
-  const adminAddUserLimit = (userId: string, addAmount: number) => {
-    const numAdd = Number(addAmount) || 5;
-    const target = allUsers.find(u => u.id === userId || u.email === userId);
-    setAllUsers(prev => {
-      const next = prev.map(u => {
-        if (u.id === userId || u.email === userId) {
-          return { ...u, daily_limit: (u.daily_limit || 5) + numAdd };
-        }
-        return u;
-      });
-      try { localStorage.setItem('alight_all_users', JSON.stringify(next)); } catch (e) {}
-      broadcastSync({ users: next });
-      return next;
-    });
-    if (currentUser?.id === userId || currentUser?.email === userId) {
-      setCurrentUser(prev => {
-        if (!prev) return null;
-        const updated = { ...prev, daily_limit: (prev.daily_limit || 5) + numAdd };
-        try { localStorage.setItem('alight_current_user', JSON.stringify(updated)); } catch (e) {}
-        return updated;
-      });
-    }
-    fetch('/api/realtime/users/admin-action', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'add_limit', userId, newLimit: numAdd, targetUser: target })
+      body: JSON.stringify({ action: 'set_limit', userId, newLimit })
     }).catch(() => {});
   };
 
   const adminBroadcastLimit = (addAmount: number) => {
-    const numAdd = Number(addAmount) || 5;
     setAllUsers(prev => {
-      const next = prev.map(u => ({ ...u, daily_limit: (u.daily_limit || 5) + numAdd }));
-      try { localStorage.setItem('alight_all_users', JSON.stringify(next)); } catch (e) {}
+      const next = prev.map(u => ({ ...u, daily_limit: u.daily_limit + addAmount }));
       broadcastSync({ users: next });
       return next;
     });
     if (currentUser) {
-      setCurrentUser(prev => {
-        if (!prev) return null;
-        const updated = { ...prev, daily_limit: (prev.daily_limit || 5) + numAdd };
-        try { localStorage.setItem('alight_current_user', JSON.stringify(updated)); } catch (e) {}
-        return updated;
-      });
+      setCurrentUser(prev => prev ? { ...prev, daily_limit: prev.daily_limit + addAmount } : null);
     }
     fetch('/api/realtime/users/admin-action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'broadcast_limit', broadcastAdd: numAdd })
+      body: JSON.stringify({ action: 'broadcast_limit', broadcastAdd: addAmount })
     }).catch(() => {});
   };
 
   const adminResetUserLimit = (userId: string) => {
     setAllUsers(prev => {
-      const next = prev.map(u => (u.id === userId || u.email === userId ? { ...u, used_limit_today: 0 } : u));
-      try { localStorage.setItem('alight_all_users', JSON.stringify(next)); } catch (e) {}
+      const next = prev.map(u => (u.id === userId ? { ...u, used_limit_today: 0 } : u));
       broadcastSync({ users: next });
       return next;
     });
-    if (currentUser?.id === userId || currentUser?.email === userId) {
-      setCurrentUser(prev => {
-        if (!prev) return null;
-        const updated = { ...prev, used_limit_today: 0 };
-        try { localStorage.setItem('alight_current_user', JSON.stringify(updated)); } catch (e) {}
-        return updated;
-      });
+    if (currentUser?.id === userId) {
+      setCurrentUser(prev => prev ? { ...prev, used_limit_today: 0 } : null);
     }
     fetch('/api/realtime/users/admin-action', {
       method: 'POST',
@@ -1319,18 +1162,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const adminChangeRole = (userId: string, role: UserRole) => {
     const limit = role === 'admin' ? 9999 : role === 'vip' ? 100 : 5;
     setAllUsers(prev => {
-      const next = prev.map(u => (u.id === userId || u.email === userId ? { ...u, role, daily_limit: limit } : u));
-      try { localStorage.setItem('alight_all_users', JSON.stringify(next)); } catch (e) {}
+      const next = prev.map(u => (u.id === userId ? { ...u, role, daily_limit: limit } : u));
       broadcastSync({ users: next });
       return next;
     });
-    if (currentUser?.id === userId || currentUser?.email === userId) {
-      setCurrentUser(prev => {
-        if (!prev) return null;
-        const updated = { ...prev, role, daily_limit: limit };
-        try { localStorage.setItem('alight_current_user', JSON.stringify(updated)); } catch (e) {}
-        return updated;
-      });
+    if (currentUser?.id === userId) {
+      setCurrentUser(prev => prev ? { ...prev, role, daily_limit: limit } : null);
     }
     fetch('/api/realtime/users/admin-action', {
       method: 'POST',
@@ -1341,34 +1178,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const adminAddRedeemCode = (code: string, reward: number) => {
     const clean = code.trim().toUpperCase();
-    if (!clean) return;
-    const numReward = Number(reward) || 10;
     const newCode: RedeemCode = {
       code: clean,
       created_by: currentUser?.username || 'AlcaW44',
-      limit_reward: numReward,
+      limit_reward: reward,
       is_active: true,
       created_at: new Date().toISOString()
     };
     setRedeemCodes(prev => {
-      const next = [newCode, ...prev.filter(c => c.code.toUpperCase() !== clean)];
-      try { localStorage.setItem('alight_redeem_codes', JSON.stringify(next)); } catch (e) {}
+      const next = [newCode, ...prev.filter(c => c.code !== clean)];
       broadcastSync({ redeemCodes: next });
       return next;
     });
     fetch('/api/realtime/redeem-code', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: clean, limit_reward: numReward })
+      body: JSON.stringify({ code: clean, limit_reward: reward })
     }).catch(() => {});
   };
 
   const adminDeleteRedeemCode = (codeToDelete: string) => {
     const clean = codeToDelete.trim().toUpperCase();
-    if (!clean) return;
     setRedeemCodes(prev => {
       const next = prev.filter(c => c.code.toUpperCase() !== clean);
-      try { localStorage.setItem('alight_redeem_codes', JSON.stringify(next)); } catch (e) {}
       broadcastSync({ redeemCodes: next });
       return next;
     });
@@ -1534,7 +1366,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         recordAMLog,
         claimRedeemCode,
         adminSetLimit,
-        adminAddUserLimit,
         adminBroadcastLimit,
         adminResetUserLimit,
         adminChangeRole,
