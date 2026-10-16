@@ -24,7 +24,7 @@ interface GeneratorViewProps {
 }
 
 export const GeneratorView: React.FC<GeneratorViewProps> = ({ openAuthModal }) => {
-  const { currentUser, recordAMLog, amLogs, claimRedeemCode } = useAuth();
+  const { currentUser, recordAMLog, amLogs, claimRedeemCode, redeemCodes, claimedCodes } = useAuth();
 
   // Workflow steps:
   // 1 = Enter Email & Send Link
@@ -509,13 +509,56 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({ openAuthModal }) =
           
           {/* Redeem Code Card */}
           <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 backdrop-blur-md shadow-xl">
-            <div className="flex items-center gap-2 text-white font-bold text-sm mb-1">
-              <Gift className="w-4 h-4 text-emerald-400" />
-              <span>Klaim Kode Redeem</span>
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2 text-white font-bold text-sm">
+                <Gift className="w-4 h-4 text-emerald-400" />
+                <span>Klaim Kode Redeem</span>
+              </div>
+              {currentUser && (
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
+                  Limit: {currentUser.daily_limit}x/hari
+                </span>
+              )}
             </div>
-            <p className="text-xs text-slate-400 mb-4">
-              Masukkan kode redeem event dari saluran WhatsApp Alca W44 untuk menambah kuota harian.
+            <p className="text-xs text-slate-400 mb-3">
+              Masukkan kode redeem event dari saluran WhatsApp Alca W44 untuk menambah kuota harian permanen.
             </p>
+
+            {/* Quick Available Codes Suggestions */}
+            {redeemCodes && redeemCodes.length > 0 && (
+              <div className="mb-3 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-semibold mb-1.5">
+                  Kode Redeem Event Aktif (Klik untuk pasang):
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {redeemCodes.slice(0, 4).map(rc => {
+                    const isClaimed = Boolean(
+                      currentUser && claimedCodes?.includes(`${currentUser.id}_${rc.code.toUpperCase()}`)
+                    );
+                    return (
+                      <button
+                        key={rc.code}
+                        type="button"
+                        onClick={() => {
+                          if (!isClaimed) setRedeemInput(rc.code.toUpperCase());
+                        }}
+                        disabled={isClaimed}
+                        title={isClaimed ? 'Kode sudah Anda klaim' : `Klaim +${rc.limit_reward} limit`}
+                        className={`text-[11px] font-mono font-bold px-2 py-1 rounded-lg border transition-all flex items-center gap-1 ${
+                          isClaimed
+                            ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed line-through'
+                            : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30 hover:scale-105 active:scale-95'
+                        }`}
+                      >
+                        <span>{rc.code}</span>
+                        <span className="text-[9px] opacity-80">(+{rc.limit_reward})</span>
+                        {isClaimed && <span className="text-[9px] text-slate-500">✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {redeemMessage && (
               <div className={`mb-3 p-2.5 rounded-lg text-xs flex items-center gap-2 ${
@@ -533,15 +576,19 @@ export const GeneratorView: React.FC<GeneratorViewProps> = ({ openAuthModal }) =
                 type="text"
                 value={redeemInput}
                 onChange={(e) => setRedeemInput(e.target.value.toUpperCase())}
-                placeholder="Contoh: xxxxxxxxx"
+                placeholder="Contoh: ALCAPRO2026"
                 className="w-full px-3 py-2 bg-slate-950/70 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 uppercase font-mono tracking-wider"
               />
               <button
                 type="submit"
                 disabled={isRedeeming || !redeemInput.trim()}
-                className="w-full py-2 px-3 rounded-xl text-xs font-semibold text-slate-900 bg-emerald-400 hover:bg-emerald-300 transition-colors disabled:opacity-50"
+                className="w-full py-2 px-3 rounded-xl text-xs font-semibold text-slate-900 bg-emerald-400 hover:bg-emerald-300 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
               >
-                {isRedeeming ? 'Memvalidasi...' : 'Tukarkan Kode'}
+                {isRedeeming ? (
+                  <span>Memvalidasi ke Server...</span>
+                ) : (
+                  <span>Tukarkan Kode Sekarang</span>
+                )}
               </button>
             </form>
           </div>

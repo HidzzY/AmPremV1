@@ -1,8 +1,10 @@
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import dotenv from 'dotenv';
+import { WebSocketServer, WebSocket } from 'ws';
 
 dotenv.config();
 
@@ -12,6 +14,22 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const isProd = process.env.NODE_ENV === 'production';
+
+// Create unified HTTP Server to attach WebSockets alongside Express
+const server = http.createServer(app);
+
+// WebSocket Server attached for instant multi-user bidirectional real-time sync
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (request, socket, head) => {
+  const host = request.headers.host || `localhost:${PORT}`;
+  const { pathname } = new URL(request.url || '', `http://${host}`);
+  if (pathname === '/ws' || pathname === '/api/ws') {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
+  }
+});
 
 app.use(express.json({ limit: '30mb' }));
 app.use(express.urlencoded({ extended: true, limit: '30mb' }));
@@ -55,6 +73,21 @@ const DEFAULT_ADMIN_USER: RealtimeUser = {
   created_at: new Date().toISOString()
 };
 
+const DEFAULT_REDEEM_CODES = [
+  { code: 'ALCAPRO2026', limit_reward: 10, created_at: new Date().toISOString() },
+  { code: 'ALCAW44', limit_reward: 15, created_at: new Date().toISOString() },
+  { code: 'VIPKREATORMU', limit_reward: 20, created_at: new Date().toISOString() }
+];
+
+export interface ClaimedCodeRecord {
+  id: string;
+  user_id: string;
+  email: string;
+  code: string;
+  reward: number;
+  claimed_at: string;
+}
+
 interface RealtimeState {
   chats: Array<{
     id: string;
@@ -95,31 +128,23 @@ interface RealtimeState {
     username: string;
     avatar: string;
   }>;
-  users: Array<{
-    id: string;
-    email: string;
-    username: string;
-    avatar_url: string;
-    role: 'free' | 'vip' | 'admin';
-    daily_limit: number;
-    used_limit_today: number;
-    last_limit_reset: string;
-    created_at: string;
-  }>;
+  users: Array<RealtimeUser>;
   redeemCodes: Array<{
     code: string;
     limit_reward: number;
     created_at: string;
   }>;
+  claimedCodes: Array<ClaimedCodeRecord>;
 }
 
-// Initial state: ZERO presets, ZERO chats, ZERO gallery, ZERO logs, ZERO redeem codes, only 1 Admin user (AlcaW44)
+// Initial state
 let realtimeState: RealtimeState = {
   chats: [],
   presets: [],
   gallery: [],
   amLogs: [],
-  redeemCodes: [],
+  redeemCodes: DEFAULT_REDEEM_CODES,
+  claimedCodes: [],
   users: [DEFAULT_ADMIN_USER]
 };
 
@@ -139,12 +164,16 @@ try {
         presets: Array.isArray(parsed.presets) ? parsed.presets : [],
         gallery: Array.isArray(parsed.gallery) ? parsed.gallery : [],
         amLogs: Array.isArray(parsed.amLogs) ? parsed.amLogs : [],
-        redeemCodes: Array.isArray(parsed.redeemCodes) ? parsed.redeemCodes : [],
+        redeemCodes: Array.isArray(parsed.redeemCodes) && parsed.redeemCodes.length > 0 
+          ? parsed.redeemCodes 
+          : DEFAULT_REDEEM_CODES,
+        claimedCodes: Array.isArray(parsed.claimedCodes) ? parsed.claimedCodes : [],
         users: Array.isArray(parsed.users) && parsed.users.length > 0 
           ? parsed.users.map((u: any): RealtimeUser => ({
               ...u,
               role: (u.email === 'wahidrahmannn1324@gmail.com' ? 'admin' : (u.role || 'free')) as 'admin' | 'free' | 'vip',
-              username: u.email === 'wahidrahmannn1324@gmail.com' ? 'AlcaW44' : u.username
+              username: u.email === 'wahidrahmannn1324@gmail.com' ? 'AlcaW44' : u.username,
+              daily_limit: u.email === 'wahidrahmannn1324@gmail.com' ? 9999 : (u.daily_limit || 5)
             }))
           : [DEFAULT_ADMIN_USER]
       };
@@ -165,24 +194,105 @@ function persistState() {
   }
 }
 
-// Whitelist email domains allowed by policy for login/register
-const ALLOWED_EMAIL_DOMAINS = [
-  '@gmail.com',
-  '@yahoo.com',
-  '@yahoo.co.id',
-  '@outlook.com',
-  '@hotmail.com',
-  '@icloud.com'
-];
+// Connected SSE clients for secondary push
+const sseClients = new Set<express.Response>();
 
-function isAllowedDomain(email: string): boolean {
-  if (!email || typeof email !== 'string') return false;
-  const lower = email.trim().toLowerCase();
-  return ALLOWED_EMAIL_DOMAINS.some(domain => lower.endsWith(domain));
+// Universal Real-Time Broadcaster: Pushes to all WebSockets & SSE clients simultaneously
+function broadcastRealtime(type: string, data: any) {
+  const payloadString = JSON.stringify({ type, data, timestamp: new Date().toISOString() });
+
+  // 1. Instant WebSocket push (zero buffering delay)
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      try {
+        client.send(payloadString);
+      } catch (err) {
+        console.error('[WS] Push error:', err);
+      }
+    }
+  });
+
+  // 2. SSE fallback push with immediate flush
+  const sseChunk = `data: ${payloadString}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(sseChunk);
+      (client as any).flush?.();
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
+// WebSocket Connection Lifecycle
+wss.on('connection', (ws: WebSocket) => {
+  console.log(`[WS] Client connected. Total active WS connections: ${wss.clients.size}`);
+
+  // Send full initial state snapshot immediately upon connection
+  ws.send(JSON.stringify({
+    type: 'CONNECTED',
+    data: realtimeState,
+    timestamp: new Date().toISOString()
+  }));
+
+  ws.on('message', (raw) => {
+    try {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === 'PING') {
+        ws.send(JSON.stringify({ type: 'PONG', timestamp: new Date().toISOString() }));
+      } else if (msg.type === 'SEND_CHAT') {
+        const chat = handleNewChatMessage(msg.payload);
+        if (chat) {
+          ws.send(JSON.stringify({ type: 'CHAT_SENT_ACK', chat }));
+        }
+      }
+    } catch (err) {
+      console.error('[WS] Error processing message:', err);
+    }
+  });
+
+  ws.on('close', () => {
+    console.log(`[WS] Client disconnected. Total active WS connections: ${wss.clients.size}`);
+  });
+});
+
+// Core Chat Handler
+function handleNewChatMessage(payload: any) {
+  if (!payload || !payload.message || !String(payload.message).trim()) {
+    return null;
+  }
+
+  const cleanMessage = String(payload.message).trim();
+  const lower = cleanMessage.toLowerCase();
+  if (lower.includes('mbak siti') || lower.includes('sound kane') || lower.includes('preset jj')) {
+    return null;
+  }
+
+  const newChat = {
+    id: 'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+    user_id: payload.user_id || 'anonymous',
+    username: payload.username || 'User',
+    avatar_url: payload.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${payload.username || 'anon'}`,
+    role: (payload.role === 'admin' ? 'admin' : payload.role === 'vip' ? 'vip' : 'free') as 'free' | 'vip' | 'admin',
+    message: cleanMessage,
+    created_at: new Date().toISOString()
+  };
+
+  realtimeState.chats.push(newChat);
+  if (realtimeState.chats.length > 300) {
+    realtimeState.chats = realtimeState.chats.slice(-300);
+  }
+  persistState();
+
+  // Instant real-time broadcast to all connected clients!
+  broadcastRealtime('NEW_CHAT', { chat: newChat, chats: realtimeState.chats });
+
+  console.log(`[Chat] Real-time message from ${newChat.username}: "${cleanMessage.substring(0, 30)}..." pushed to ${wss.clients.size} WS + ${sseClients.size} SSE clients`);
+
+  return newChat;
 }
 
 // 1. POST /api/am/send-link
-// Proxies request securely to Alight Motion Worker without leaking endpoint to client
 app.post('/api/am/send-link', async (req, res) => {
   try {
     const { email, userId, dailyLimit, usedToday } = req.body;
@@ -191,12 +301,11 @@ app.post('/api/am/send-link', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Alamat email target tidak valid.' });
     }
 
-    // Limit check if provided
     if (typeof dailyLimit === 'number' && typeof usedToday === 'number') {
       if (usedToday >= dailyLimit) {
         return res.status(403).json({
           success: false,
-          message: 'Limit harian Anda sudah habis. Silakan tunggu reset 24 jam atau upgrade ke VIP untuk 100x limit harian!'
+          message: 'Limit harian Anda sudah habis. Silakan tukarkan kode redeem atau upgrade ke VIP!'
         });
       }
     }
@@ -239,7 +348,6 @@ app.post('/api/am/send-link', async (req, res) => {
 });
 
 // 2. POST /api/am/verify-link
-// Proxies verification of magic link to Alight Motion Worker
 app.post('/api/am/verify-link', async (req, res) => {
   try {
     const { email, magicLink, userId } = req.body;
@@ -277,7 +385,6 @@ app.post('/api/am/verify-link', async (req, res) => {
       });
     }
 
-    // Success response
     return res.status(200).json({
       success: true,
       message: responseData?.message || 'Akun Alight Motion Premium berhasil diverifikasi dan aktif!',
@@ -296,25 +403,7 @@ app.post('/api/am/verify-link', async (req, res) => {
   }
 });
 
-// ==========================================
-// REAL-TIME SYNC & SSE STREAM (Instant Multi-User Chat, Preset, Gallery, Logs, Users & Limit)
-// ==========================================
-
-// Connected SSE clients for instantaneous real-time push (<50ms latency)
-const sseClients = new Set<express.Response>();
-
-function broadcastSSE(type: string, data: any) {
-  const payload = `data: ${JSON.stringify({ type, data, timestamp: new Date().toISOString() })}\n\n`;
-  for (const client of sseClients) {
-    try {
-      client.write(payload);
-    } catch (e) {
-      sseClients.delete(client);
-    }
-  }
-}
-
-// GET /api/realtime/stream -> Real-time Server-Sent Events stream for all connected browsers
+// GET /api/realtime/stream -> SSE Stream
 app.get('/api/realtime/stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform, no-store, must-revalidate');
@@ -323,26 +412,24 @@ app.get('/api/realtime/stream', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.flushHeaders?.();
 
-  // Send initial snapshot immediately upon connection
   res.write(`data: ${JSON.stringify({ type: 'CONNECTED', data: realtimeState, timestamp: new Date().toISOString() })}\n\n`);
+  (res as any).flush?.();
 
   sseClients.add(res);
-  console.log(`[SSE] Client connected. Total active clients: ${sseClients.size}`);
 
-  // Heartbeat keep-alive every 15 seconds to prevent proxy timeout
   const heartbeat = setInterval(() => {
     try {
       res.write(': keep-alive\n\n');
+      (res as any).flush?.();
     } catch {
       clearInterval(heartbeat);
       sseClients.delete(res);
     }
-  }, 15000);
+  }, 10000);
 
   req.on('close', () => {
     clearInterval(heartbeat);
     sseClients.delete(res);
-    console.log(`[SSE] Client disconnected. Total active clients: ${sseClients.size}`);
   });
 });
 
@@ -351,41 +438,18 @@ app.get('/api/realtime/sync', (req, res) => {
   res.json({
     success: true,
     data: realtimeState,
-    activeConnections: sseClients.size,
+    activeWsConnections: wss.clients.size,
+    activeSseConnections: sseClients.size,
     timestamp: new Date().toISOString()
   });
 });
 
 // POST /api/realtime/chat -> Add new chat message & broadcast INSTANTLY to all users
 app.post('/api/realtime/chat', (req, res) => {
-  const { user_id, username, avatar_url, role, message } = req.body;
-  if (!message || !String(message).trim()) {
-    return res.status(400).json({ success: false, message: 'Pesan tidak boleh kosong' });
+  const newChat = handleNewChatMessage(req.body);
+  if (!newChat) {
+    return res.status(400).json({ success: false, message: 'Pesan tidak valid atau kosong' });
   }
-
-  const cleanMessage = String(message).trim();
-  const newChat = {
-    id: 'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
-    user_id: user_id || 'anonymous',
-    username: username || 'User',
-    avatar_url: avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${username || 'anon'}`,
-    role: (role === 'admin' ? 'admin' : role === 'vip' ? 'vip' : 'free') as 'free' | 'vip' | 'admin',
-    message: cleanMessage,
-    created_at: new Date().toISOString()
-  };
-
-  realtimeState.chats.push(newChat);
-  // Keep last 200 chats
-  if (realtimeState.chats.length > 200) {
-    realtimeState.chats = realtimeState.chats.slice(-200);
-  }
-  persistState();
-
-  // Instant broadcast to all connected clients!
-  broadcastSSE('NEW_CHAT', { chat: newChat, chats: realtimeState.chats });
-
-  console.log(`[Chat] Real-time message from ${newChat.username}: "${cleanMessage.substring(0, 30)}..." pushed to ${sseClients.size} clients`);
-
   res.json({ success: true, chat: newChat, chats: realtimeState.chats });
 });
 
@@ -412,33 +476,32 @@ app.post('/api/realtime/preset', (req, res) => {
   realtimeState.presets.unshift(newPreset);
   persistState();
 
-  broadcastSSE('PRESETS_UPDATED', { presets: realtimeState.presets, newPreset });
-
+  broadcastRealtime('PRESETS_UPDATED', { presets: realtimeState.presets, newPreset });
   res.json({ success: true, preset: newPreset, presets: realtimeState.presets });
 });
 
-// DELETE /api/realtime/preset/:id -> Delete preset & broadcast
+// DELETE /api/realtime/preset/:id
 app.delete('/api/realtime/preset/:id', (req, res) => {
   const { id } = req.params;
   realtimeState.presets = realtimeState.presets.filter(p => p.id !== id);
   persistState();
-  broadcastSSE('PRESETS_UPDATED', { presets: realtimeState.presets });
+  broadcastRealtime('PRESETS_UPDATED', { presets: realtimeState.presets });
   res.json({ success: true, presets: realtimeState.presets });
 });
 
-// POST /api/realtime/preset/:id/download -> Increment download count & broadcast
+// POST /api/realtime/preset/:id/download
 app.post('/api/realtime/preset/:id/download', (req, res) => {
   const { id } = req.params;
   const p = realtimeState.presets.find(item => item.id === id);
   if (p) {
     p.downloads = (p.downloads || 0) + 1;
     persistState();
-    broadcastSSE('PRESETS_UPDATED', { presets: realtimeState.presets });
+    broadcastRealtime('PRESETS_UPDATED', { presets: realtimeState.presets });
   }
   res.json({ success: true, presets: realtimeState.presets });
 });
 
-// POST /api/realtime/gallery -> Upload gallery item & broadcast
+// POST /api/realtime/gallery
 app.post('/api/realtime/gallery', (req, res) => {
   const { image_url, caption, user_id, username, avatar_url } = req.body;
   if (!image_url) {
@@ -458,23 +521,23 @@ app.post('/api/realtime/gallery', (req, res) => {
 
   realtimeState.gallery.unshift(newItem);
   persistState();
-  broadcastSSE('GALLERY_UPDATED', { gallery: realtimeState.gallery, newItem });
+  broadcastRealtime('GALLERY_UPDATED', { gallery: realtimeState.gallery, newItem });
   res.json({ success: true, item: newItem, gallery: realtimeState.gallery });
 });
 
-// POST /api/realtime/gallery/:id/like -> Toggle like & broadcast
+// POST /api/realtime/gallery/:id/like
 app.post('/api/realtime/gallery/:id/like', (req, res) => {
   const { id } = req.params;
   const g = realtimeState.gallery.find(item => item.id === id);
   if (g) {
     g.likes = (g.likes || 0) + 1;
     persistState();
-    broadcastSSE('GALLERY_UPDATED', { gallery: realtimeState.gallery });
+    broadcastRealtime('GALLERY_UPDATED', { gallery: realtimeState.gallery });
   }
   res.json({ success: true, gallery: realtimeState.gallery });
 });
 
-// POST /api/realtime/am-log -> Record account creation & update real-time "Terpakai" limit!
+// POST /api/realtime/am-log
 app.post('/api/realtime/am-log', (req, res) => {
   const { targetEmail, userId, username, avatar } = req.body;
   if (!targetEmail) {
@@ -492,7 +555,6 @@ app.post('/api/realtime/am-log', (req, res) => {
 
   realtimeState.amLogs.unshift(newLog);
 
-  // Update real-time "Terpakai" limit in user record!
   if (userId) {
     const userIndex = realtimeState.users.findIndex(u => u.id === userId);
     if (userIndex !== -1) {
@@ -501,11 +563,11 @@ app.post('/api/realtime/am-log', (req, res) => {
   }
 
   persistState();
-  broadcastSSE('AM_LOGS_UPDATED', { log: newLog, amLogs: realtimeState.amLogs, users: realtimeState.users });
+  broadcastRealtime('AM_LOGS_UPDATED', { log: newLog, amLogs: realtimeState.amLogs, users: realtimeState.users });
   res.json({ success: true, log: newLog, amLogs: realtimeState.amLogs, users: realtimeState.users });
 });
 
-// POST & PUT /api/realtime/users/sync & /api/realtime/profile -> Sync user profile into server user list & broadcast
+// POST & PUT /api/realtime/users/sync & /api/realtime/profile
 const handleUserSync = (req: express.Request, res: express.Response) => {
   const user = req.body?.user || req.body;
   if (!user || (!user.id && !user.email)) {
@@ -526,13 +588,17 @@ const handleUserSync = (req: express.Request, res: express.Response) => {
     const isWahid = (user.email && user.email.toLowerCase() === 'wahidrahmannn1324@gmail.com') || 
                     (existing.email && existing.email.toLowerCase() === 'wahidrahmannn1324@gmail.com');
 
+    // CRITICAL FIX: Ensure user's earned limit (from redeem codes or admin) is NEVER downgraded!
+    const incomingLimit = typeof user.daily_limit === 'number' && user.daily_limit > 0 ? user.daily_limit : 0;
+    const finalDailyLimit = isWahid ? 9999 : Math.max(existing.daily_limit || 5, incomingLimit || 5);
+
     realtimeState.users[existingIdx] = {
       ...existing,
       ...user,
       avatar_url: cleanAvatar || existing.avatar_url,
       used_limit_today: Math.max(existing.used_limit_today || 0, user.used_limit_today || 0),
-      daily_limit: existing.daily_limit || user.daily_limit || (isWahid ? 9999 : 5),
-      role: isWahid ? 'admin' : (existing.role || user.role || 'free'),
+      daily_limit: finalDailyLimit,
+      role: isWahid ? 'admin' : (user.role || existing.role || 'free'),
       username: isWahid ? 'AlcaW44' : (user.username || existing.username)
     };
   } else {
@@ -551,7 +617,7 @@ const handleUserSync = (req: express.Request, res: express.Response) => {
   }
 
   persistState();
-  broadcastSSE('USERS_UPDATED', { users: realtimeState.users });
+  broadcastRealtime('USERS_UPDATED', { users: realtimeState.users });
   res.json({ success: true, users: realtimeState.users });
 };
 
@@ -560,7 +626,7 @@ app.put('/api/realtime/users/sync', handleUserSync);
 app.post('/api/realtime/profile', handleUserSync);
 app.put('/api/realtime/profile', handleUserSync);
 
-// POST /api/realtime/users/admin-action -> Admin changes limit, resets limit, or changes role
+// POST /api/realtime/users/admin-action
 app.post('/api/realtime/users/admin-action', (req, res) => {
   const { action, userId, newLimit, role, broadcastAdd } = req.body;
 
@@ -586,11 +652,11 @@ app.post('/api/realtime/users/admin-action', (req, res) => {
   }
 
   persistState();
-  broadcastSSE('USERS_UPDATED', { users: realtimeState.users });
+  broadcastRealtime('USERS_UPDATED', { users: realtimeState.users });
   res.json({ success: true, users: realtimeState.users });
 });
 
-// Redeem Codes CRUD
+// Redeem Codes CRUD & Claim
 app.post('/api/realtime/redeem-code', (req, res) => {
   const { code, limit_reward } = req.body;
   if (!code || !code.trim()) {
@@ -598,7 +664,6 @@ app.post('/api/realtime/redeem-code', (req, res) => {
   }
 
   const cleanCode = code.trim().toUpperCase();
-  // check exists
   if (realtimeState.redeemCodes.some(r => r.code === cleanCode)) {
     return res.status(400).json({ success: false, message: 'Kode redeem sudah terdaftar' });
   }
@@ -611,18 +676,96 @@ app.post('/api/realtime/redeem-code', (req, res) => {
 
   realtimeState.redeemCodes.unshift(newCode);
   persistState();
-  broadcastSSE('REDEEM_CODES_UPDATED', { redeemCodes: realtimeState.redeemCodes });
+  broadcastRealtime('REDEEM_CODES_UPDATED', { redeemCodes: realtimeState.redeemCodes });
   res.json({ success: true, redeemCode: newCode, redeemCodes: realtimeState.redeemCodes });
 });
 
-// DELETE /api/realtime/redeem-code/:code -> Delete redeem code & broadcast
 app.delete('/api/realtime/redeem-code/:code', (req, res) => {
   const { code } = req.params;
   const cleanCode = decodeURIComponent(code).trim().toUpperCase();
   realtimeState.redeemCodes = realtimeState.redeemCodes.filter(r => r.code.toUpperCase() !== cleanCode);
   persistState();
-  broadcastSSE('REDEEM_CODES_UPDATED', { redeemCodes: realtimeState.redeemCodes });
+  broadcastRealtime('REDEEM_CODES_UPDATED', { redeemCodes: realtimeState.redeemCodes });
   res.json({ success: true, redeemCodes: realtimeState.redeemCodes });
+});
+
+// Dedicated Server-Authoritative Endpoint: POST /api/realtime/redeem-code/claim
+app.post('/api/realtime/redeem-code/claim', (req, res) => {
+  const { code, userId, email, username } = req.body;
+  if (!code || !String(code).trim()) {
+    return res.status(400).json({ success: false, message: 'Silakan masukkan kode redeem.' });
+  }
+  if (!userId) {
+    return res.status(401).json({ success: false, message: 'Silakan login terlebih dahulu untuk klaim kode redeem.' });
+  }
+
+  const cleanCode = String(code).trim().toUpperCase();
+  const foundCode = realtimeState.redeemCodes.find(r => r.code.toUpperCase() === cleanCode);
+
+  if (!foundCode) {
+    return res.status(404).json({ success: false, message: `Kode redeem "${cleanCode}" tidak valid atau belum terdaftar.` });
+  }
+
+  // Check if this specific user already claimed this code
+  const alreadyClaimed = realtimeState.claimedCodes.some(c => 
+    c.code.toUpperCase() === cleanCode && 
+    (c.user_id === userId || (email && c.email && c.email.toLowerCase() === String(email).toLowerCase()))
+  );
+
+  if (alreadyClaimed) {
+    return res.status(400).json({ success: false, message: `Kode redeem "${cleanCode}" sudah pernah Anda pakai.` });
+  }
+
+  // Find or register user
+  let user = realtimeState.users.find(u => 
+    u.id === userId || (email && u.email.toLowerCase() === String(email).toLowerCase())
+  );
+
+  if (!user) {
+    const isWahid = email && email.toLowerCase() === 'wahidrahmannn1324@gmail.com';
+    user = {
+      id: userId,
+      email: email || '',
+      username: username || 'User',
+      avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${username || 'user'}`,
+      role: isWahid ? 'admin' : 'free',
+      daily_limit: isWahid ? 9999 : 5,
+      used_limit_today: 0,
+      last_limit_reset: new Date().toISOString(),
+      created_at: new Date().toISOString()
+    };
+    realtimeState.users.push(user);
+  }
+
+  const reward = Number(foundCode.limit_reward) || 5;
+  user.daily_limit = (user.daily_limit || 5) + reward;
+
+  const claimRecord: ClaimedCodeRecord = {
+    id: 'claim-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+    user_id: userId,
+    email: user.email,
+    code: cleanCode,
+    reward,
+    claimed_at: new Date().toISOString()
+  };
+
+  realtimeState.claimedCodes.push(claimRecord);
+  persistState();
+
+  // Instant broadcast to all clients so UI updates immediately without reload
+  broadcastRealtime('USERS_UPDATED', { users: realtimeState.users });
+  broadcastRealtime('CLAIMED_CODES_UPDATED', { claimedCodes: realtimeState.claimedCodes });
+
+  console.log(`[Redeem] User ${user.username} (${user.email}) claimed ${cleanCode} for +${reward} limit. New limit: ${user.daily_limit}`);
+
+  return res.status(200).json({
+    success: true,
+    message: `Selamat! Kode redeem "${cleanCode}" berhasil diklaim. Kuota harian Anda bertambah +${reward} limit!`,
+    reward,
+    newDailyLimit: user.daily_limit,
+    claimedCodes: realtimeState.claimedCodes,
+    user
+  });
 });
 
 // Health check endpoint
@@ -631,14 +774,17 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     creator: 'Alca W44',
-    service: 'Alight Pro AM Realtime Proxy',
+    service: 'Alight Pro AM Realtime Proxy with WebSockets',
     stats: {
       users: realtimeState.users.length,
       chats: realtimeState.chats.length,
       presets: realtimeState.presets.length,
       gallery: realtimeState.gallery.length,
       logs: realtimeState.amLogs.length,
-      redeemCodes: realtimeState.redeemCodes.length
+      redeemCodes: realtimeState.redeemCodes.length,
+      claimedCodes: realtimeState.claimedCodes.length,
+      wsClients: wss.clients.size,
+      sseClients: sseClients.size
     }
   });
 });
@@ -658,8 +804,8 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Server] Running on http://localhost:${PORT} (${isProd ? 'production' : 'development'})`);
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`[Server] Running on http://localhost:${PORT} with WebSockets on ws://localhost:${PORT}/ws (${isProd ? 'production' : 'development'})`);
   });
 }
 

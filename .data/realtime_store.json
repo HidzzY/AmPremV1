@@ -3,7 +3,24 @@
   "presets": [],
   "gallery": [],
   "amLogs": [],
-  "redeemCodes": [],
+  "redeemCodes": [
+    {
+      "code": "ALCAPRO2026",
+      "limit_reward": 10,
+      "created_at": "2026-10-16T12:00:00.000Z"
+    },
+    {
+      "code": "ALCAW44",
+      "limit_reward": 15,
+      "created_at": "2026-10-16T12:00:00.000Z"
+    },
+    {
+      "code": "VIPKREATORMU",
+      "limit_reward": 20,
+      "created_at": "2026-10-16T12:00:00.000Z"
+    }
+  ],
+  "claimedCodes": [],
   "users": [
     {
       "id": "user-admin-wahid",
@@ -13,8 +30,8 @@
       "role": "admin",
       "daily_limit": 9999,
       "used_limit_today": 0,
-      "last_limit_reset": "2026-10-15T12:00:00.000Z",
-      "created_at": "2026-10-15T12:00:00.000Z"
+      "last_limit_reset": "2026-10-16T12:00:00.000Z",
+      "created_at": "2026-10-16T12:00:00.000Z"
     }
   ]
 }
