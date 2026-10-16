@@ -1,5 +1,6 @@
 // Vercel Serverless Function: /api/realtime/stream
 // Provides standard Server-Sent Events headers and handshake for browsers and reverse proxies
+import { realtimeStore, getCleanUsers } from './_store';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -15,8 +16,22 @@ export default async function handler(req: any, res: any) {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
 
-  // Send initial SSE handshake event
-  res.write(`data: ${JSON.stringify({ type: 'CONNECTED', message: 'Alight Pro Realtime Active', timestamp: new Date().toISOString() })}\n\n`);
+  // Send initial SSE handshake event with full state
+  const payload = {
+    type: 'CONNECTED',
+    message: 'Alight Pro Realtime Active',
+    timestamp: new Date().toISOString(),
+    data: {
+      users: getCleanUsers(),
+      chats: realtimeStore.chats,
+      presets: realtimeStore.presets,
+      gallery: realtimeStore.gallery,
+      amLogs: realtimeStore.amLogs,
+      redeemCodes: realtimeStore.redeemCodes
+    }
+  };
+
+  res.write(`data: ${JSON.stringify(payload)}\n\n`);
 
   // Allow short keepalive then close gracefully so serverless function does not hang
   const timer = setTimeout(() => {
