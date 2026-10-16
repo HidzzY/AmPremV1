@@ -311,17 +311,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       (curr.avatar_url && !curr.avatar_url.includes('images.unsplash.com') ? curr.avatar_url : null);
 
     const chosenAvatar = customAvatar || (curr.avatar_url && !curr.avatar_url.includes('images.unsplash.com') ? curr.avatar_url : (fresh.avatar_url || curr.avatar_url));
+    const mergedDailyLimit = isSuperAdmin ? 9999 : Math.max(fresh.daily_limit || 0, curr.daily_limit || 0);
 
-    return {
+    const updatedUser: UserProfile = {
       ...curr,
       ...fresh,
       id: curr.id, // Keep the active client session ID
       username: isSuperAdmin ? 'AlcaW44' : (curr.username || fresh.username),
       avatar_url: chosenAvatar,
       role: isSuperAdmin ? 'admin' : (fresh.role || curr.role),
-      daily_limit: isSuperAdmin ? 9999 : (fresh.daily_limit || curr.daily_limit),
+      daily_limit: mergedDailyLimit,
       used_limit_today: fresh.used_limit_today !== undefined ? fresh.used_limit_today : curr.used_limit_today
     };
+
+    try { localStorage.setItem('alight_current_user', JSON.stringify(updatedUser)); } catch (e) {}
+    return updatedUser;
   };
 
   const filterCleanChats = (chatList: ChatMessage[]): ChatMessage[] => {
@@ -1129,7 +1133,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     let foundCode = redeemCodes.find(c => c.code.toUpperCase() === cleanCode && (c.is_active ?? true));
 
-    // Fallback: If not found in memory, query server endpoint
+    // Fallback: If not found in memory, query server endpoints
     if (!foundCode) {
       try {
         const res = await fetch(`/api/realtime/redeem-code/${encodeURIComponent(cleanCode)}`);
@@ -1137,14 +1141,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const resData = await res.json();
           if (resData.success && resData.redeemCode) {
             foundCode = resData.redeemCode;
-            setRedeemCodes(prev => {
-              const next = [foundCode!, ...prev.filter(c => c.code.toUpperCase() !== cleanCode)];
-              try { localStorage.setItem('alight_redeem_codes', JSON.stringify(next)); } catch (e) {}
-              return next;
-            });
           }
         }
       } catch (e) {}
+
+      // Secondary fallback: query full redeem codes list
+      if (!foundCode) {
+        try {
+          const resList = await fetch('/api/realtime/redeem-code');
+          if (resList.ok) {
+            const listData = await resList.json();
+            if (listData.success && Array.isArray(listData.redeemCodes)) {
+              mergeServerRedeemCodes(listData.redeemCodes);
+              foundCode = listData.redeemCodes.find((c: any) => c.code.toUpperCase() === cleanCode && (c.is_active ?? true));
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (foundCode) {
+        setRedeemCodes(prev => {
+          const next = [foundCode!, ...prev.filter(c => c.code.toUpperCase() !== cleanCode)];
+          try { localStorage.setItem('alight_redeem_codes', JSON.stringify(next)); } catch (e) {}
+          return next;
+        });
+      }
     }
 
     if (!foundCode) {
@@ -1171,10 +1192,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setClaimedCodes(newClaimed);
     try { localStorage.setItem('alight_claimed_codes', JSON.stringify(newClaimed)); } catch (e) {}
 
+    // Synchronize to server users and claim record
     fetch('/api/realtime/users/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user: updatedUser })
+    }).catch(() => {});
+
+    fetch('/api/realtime/redeem-code/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: cleanCode,
+        userId: currentUser.id,
+        userEmail: currentUser.email,
+        reward
+      })
     }).catch(() => {});
 
     return {
@@ -1187,6 +1220,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Admin Actions
   const adminSetLimit = (userId: string, newLimit: number) => {
     const numLimit = Number(newLimit) || 5;
+    const target = allUsers.find(u => u.id === userId || u.email === userId);
     setAllUsers(prev => {
       const next = prev.map(u => (u.id === userId || u.email === userId ? { ...u, daily_limit: numLimit } : u));
       try { localStorage.setItem('alight_all_users', JSON.stringify(next)); } catch (e) {}
@@ -1204,12 +1238,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     fetch('/api/realtime/users/admin-action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'set_limit', userId, newLimit: numLimit })
+      body: JSON.stringify({ action: 'set_limit', userId, newLimit: numLimit, targetUser: target })
     }).catch(() => {});
   };
 
   const adminAddUserLimit = (userId: string, addAmount: number) => {
     const numAdd = Number(addAmount) || 5;
+    const target = allUsers.find(u => u.id === userId || u.email === userId);
     setAllUsers(prev => {
       const next = prev.map(u => {
         if (u.id === userId || u.email === userId) {
@@ -1232,7 +1267,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     fetch('/api/realtime/users/admin-action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'add_limit', userId, newLimit: numAdd })
+      body: JSON.stringify({ action: 'add_limit', userId, newLimit: numAdd, targetUser: target })
     }).catch(() => {});
   };
 
