@@ -30,8 +30,8 @@
       "role": "admin",
       "daily_limit": 9999,
       "used_limit_today": 0,
-      "last_limit_reset": "2026-10-16T12:00:00.000Z",
-      "created_at": "2026-10-16T12:00:00.000Z"
+      "last_limit_reset": "2026-10-15T12:00:00.000Z",
+      "created_at": "2026-10-15T12:00:00.000Z"
     }
   ]
 }

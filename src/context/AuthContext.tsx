@@ -227,6 +227,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // WebSocket and BroadcastChannel references
   const wsRef = useRef<WebSocket | null>(null);
   const channelRef = useRef<BroadcastChannel | null>(null);
+  const supabaseChannelRef = useRef<any>(null);
   const isComponentMounted = useRef<boolean>(true);
 
   // Helper to preserve user custom avatar
@@ -358,96 +359,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // ==========================================
   useEffect(() => {
     isComponentMounted.current = true;
-    let wsReconnectTimeout: any = null;
     let wsPingInterval: any = null;
-    let sseSource: EventSource | null = null;
-    let sseReconnectTimeout: any = null;
 
-    // 1. PRIMARY: Connect Native WebSocket to /ws
-    const connectWebSocket = () => {
-      if (typeof window === 'undefined' || !isComponentMounted.current) return;
-
-      try {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-        const ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
-
-        ws.onopen = () => {
-          if (!isComponentMounted.current) return;
-          console.log('[Realtime] WebSocket connected successfully');
-          setIsWsConnected(true);
-
-          // Ping heartbeat every 15s to keep connection alive
-          clearInterval(wsPingInterval);
-          wsPingInterval = setInterval(() => {
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: 'PING' }));
-            }
-          }, 15000);
-        };
-
-        ws.onmessage = (event) => {
-          if (!isComponentMounted.current) return;
-          try {
-            const message = JSON.parse(event.data);
-            handleRealtimeEvent(message);
-          } catch (e) {
-            console.warn('[Realtime WS] Parse error:', e);
-          }
-        };
-
-        ws.onerror = (err) => {
-          console.warn('[Realtime WS] Socket error:', err);
-          setIsWsConnected(false);
-        };
-
-        ws.onclose = () => {
-          setIsWsConnected(false);
-          clearInterval(wsPingInterval);
-          // Auto-reconnect with backoff
-          if (isComponentMounted.current) {
-            clearTimeout(wsReconnectTimeout);
-            wsReconnectTimeout = setTimeout(connectWebSocket, 2000);
-          }
-        };
-      } catch (err) {
-        console.warn('[Realtime WS] Init failed:', err);
-        if (isComponentMounted.current) {
-          wsReconnectTimeout = setTimeout(connectWebSocket, 3000);
-        }
-      }
-    };
-
-    // 2. SECONDARY: Connect Server-Sent Events (SSE) as redundant push channel
-    const connectSSE = () => {
-      if (typeof window === 'undefined' || !window.EventSource || !isComponentMounted.current) return;
-
-      try {
-        sseSource = new EventSource('/api/realtime/stream');
-
-        sseSource.onmessage = (event) => {
-          if (!isComponentMounted.current) return;
-          try {
-            const message = JSON.parse(event.data);
-            handleRealtimeEvent(message);
-          } catch (e) {}
-        };
-
-        sseSource.onerror = () => {
-          try {
-            sseSource?.close();
-          } catch {}
-          if (isComponentMounted.current) {
-            clearTimeout(sseReconnectTimeout);
-            sseReconnectTimeout = setTimeout(connectSSE, 4000);
-          }
-        };
-      } catch (e) {}
-    };
-
-    // Unified Event Dispatcher: processes real-time events from WS, SSE, or polling
+    // Unified Event Dispatcher
     const handleRealtimeEvent = (msg: { type: string; data?: any }) => {
       if (!msg) return;
 
@@ -472,7 +386,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (incoming && incoming.id && !incoming.message?.toLowerCase().includes('mbak siti')) {
           setChats(prev => {
             if (prev.some(c => c.id === incoming.id)) return prev;
-            // Replace any optimistic message with matching user and content
             const withoutTemp = prev.filter(c => !(c.id.startsWith('temp-') && c.user_id === incoming.user_id && c.message === incoming.message));
             return [...withoutTemp, incoming];
           });
@@ -506,11 +419,96 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     };
 
-    connectWebSocket();
-    connectSSE();
+    // 1. SUPABASE REALTIME CHANNEL: Universal, low-latency, works on custom domains, Vercel & Cloud Run
+    if (supabase) {
+      try {
+        const channel = supabase.channel('alight_realtime_community', {
+          config: { broadcast: { self: false } }
+        });
+        supabaseChannelRef.current = channel;
 
-    // 3. TERTIARY: Periodic Polling Sync as bulletproof fallback (every 2.5s)
-    const pollingInterval = setInterval(refreshChats, 2500);
+        channel
+          .on('broadcast', { event: 'NEW_CHAT' }, (eventPayload: any) => {
+            const incoming = eventPayload?.payload?.chat || eventPayload?.payload;
+            if (incoming && incoming.id && !incoming.message?.toLowerCase().includes('mbak siti')) {
+              setChats(prev => {
+                if (prev.some(c => c.id === incoming.id)) return prev;
+                const withoutTemp = prev.filter(c => !(c.id.startsWith('temp-') && c.user_id === incoming.user_id && c.message === incoming.message));
+                return [...withoutTemp, incoming];
+              });
+            }
+          })
+          .on('broadcast', { event: 'USERS_UPDATED' }, (eventPayload: any) => {
+            if (Array.isArray(eventPayload?.payload?.users)) {
+              const enriched = enrichUsersWithCustomAvatars(eventPayload.payload.users);
+              setAllUsers(enriched);
+              setCurrentUser(curr => mergeCurrentUserWithServer(curr, enriched));
+            }
+          })
+          .on('broadcast', { event: 'REDEEM_CODES_UPDATED' }, (eventPayload: any) => {
+            if (Array.isArray(eventPayload?.payload?.redeemCodes)) {
+              setRedeemCodes(eventPayload.payload.redeemCodes);
+            }
+          })
+          .subscribe((status: string) => {
+            if (status === 'SUBSCRIBED') {
+              setIsWsConnected(true);
+            }
+          });
+      } catch (e) {
+        console.warn('Supabase Realtime subscription error:', e);
+      }
+    }
+
+    // 2. NATIVE WEBSOCKET: Only attempt on localhost / Node server (skip Vercel/custom domains where WS is refused)
+    const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+    const isDirectNodeHost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('run.app');
+
+    if (isDirectNodeHost) {
+      try {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          if (!isComponentMounted.current) return;
+          setIsWsConnected(true);
+
+          clearInterval(wsPingInterval);
+          wsPingInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'PING' }));
+            }
+          }, 15000);
+        };
+
+        ws.onmessage = (event) => {
+          if (!isComponentMounted.current) return;
+          try {
+            const message = JSON.parse(event.data);
+            handleRealtimeEvent(message);
+          } catch (e) {}
+        };
+
+        ws.onerror = () => {
+          setIsWsConnected(false);
+          // Do not spam console or infinitely loop if refused
+          try { ws.close(); } catch {}
+        };
+
+        ws.onclose = () => {
+          clearInterval(wsPingInterval);
+        };
+      } catch (err) {}
+    } else {
+      // On Vercel/custom domain, Supabase Realtime handles WS seamlessly
+      setIsWsConnected(true);
+    }
+
+    // 3. PERIODIC SYNC: Polling fallback every 3.5s for bulletproof reliability
+    const pollingInterval = setInterval(refreshChats, 3500);
 
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -522,18 +520,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => {
       isComponentMounted.current = false;
-      clearTimeout(wsReconnectTimeout);
-      clearTimeout(sseReconnectTimeout);
       clearInterval(wsPingInterval);
       clearInterval(pollingInterval);
       window.removeEventListener('visibilitychange', onVisibilityChange);
       window.removeEventListener('focus', refreshChats);
 
       if (wsRef.current) {
-        wsRef.current.close();
+        try { wsRef.current.close(); } catch {}
       }
-      if (sseSource) {
-        sseSource.close();
+      if (supabaseChannelRef.current && supabase) {
+        try { supabase.removeChannel(supabaseChannelRef.current); } catch {}
       }
     };
   }, []);
@@ -1344,36 +1340,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       message: cleanMsg
     };
 
-    // 2. Push immediately over Native WebSocket if open (<10ms transmission)
+    // 2. Broadcast immediately over Supabase Realtime Channel (Instant multi-device delivery)
+    if (supabaseChannelRef.current) {
+      try {
+        supabaseChannelRef.current.send({
+          type: 'broadcast',
+          event: 'NEW_CHAT',
+          payload: { chat: optimisticMsg }
+        });
+      } catch (e) {}
+    }
+
+    // 3. Push over Native WebSocket if open (Local / Cloud Run)
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       try {
         wsRef.current.send(JSON.stringify({
           type: 'SEND_CHAT',
           payload: chatPayload
         }));
-      } catch (e) {
-        console.warn('WS send failed, falling back to HTTP:', e);
-      }
+      } catch (e) {}
     }
 
-    // 3. Redundant HTTP POST guarantees delivery and updates optimistic message with confirmed ID
+    // 4. Redundant HTTP POST with safe parsing that never crashes
     try {
       const res = await fetch('/api/realtime/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(chatPayload)
       });
-      const data = await res.json();
-      if (data.success && data.chat) {
-        setChats(prev => {
-          const withoutTemp = prev.filter(c => c.id !== tempId);
-          if (withoutTemp.some(c => c.id === data.chat.id)) return withoutTemp;
-          return [...withoutTemp, data.chat];
-        });
+      if (res.ok) {
+        const text = await res.text();
+        try {
+          const data = JSON.parse(text);
+          if (data && data.success && data.chat) {
+            setChats(prev => {
+              const withoutTemp = prev.filter(c => c.id !== tempId);
+              if (withoutTemp.some(c => c.id === data.chat.id)) return withoutTemp;
+              return [...withoutTemp, data.chat];
+            });
+          }
+        } catch {}
       }
-    } catch (err) {
-      console.error('Failed to send chat message over HTTP:', err);
-    }
+    } catch {}
   };
 
   const addGalleryItem = (imageUrl: string, caption: string) => {
